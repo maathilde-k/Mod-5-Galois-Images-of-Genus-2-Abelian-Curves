@@ -6,3 +6,6 @@ All code provided is written in Magma.
 Note that the primary implementation relies on Andrew Sutherland's [Smalljac](https://math.mit.edu/~drew/smalljac.html) and this may require separate configuration.
 An alternative (but much slower) method is provided which does require Smalljac.
 
+## Acknowledgements
+
+We are grateful to Isabel Vogt and Sachi Hashimoto for their guidance and support throughout this project.
