@@ -64,13 +64,15 @@ SquareDifference := function(sampled, expected)
     return sum;
 end function;
 
-// I left off here -Andy
 
+// Takes a genus 2 hyperelliptic curve X and an upper limit on the number of primes to sample (ie sample the primes p < upper_limit)
+// and returns a list with the coefficients of the characteristic polynomial for each sampled frobenius element
 RunSmalljac := function(X, upper_limit)
     // First ensure that the curve is simplified:
-    f,_:= HyperellipticPolynomials(X);
+    C := SimplifiedModel(X);
 
-    // Now run the command in smalljac
+    // Now extract the coefficients from the simplified curve
+    f,_:= HyperellipticPolynomials(C);
     coeffs := Coefficients(f);
     a0 := coeffs[1];
     a1 := coeffs[2];
@@ -78,6 +80,9 @@ RunSmalljac := function(X, upper_limit)
     a3 := coeffs[4];
     a4 := coeffs[5];
     a5 := coeffs[6];
+
+    // Run the curve through smalljac.
+    // NOTE: the command may have to be changed depending on how smalljac is configured on your device
     if #coeffs eq 6 then
         command := Sprintf("~/lpdata2 %o \"%ox^5 + %ox^4 + %ox^3 + %ox^2 + %ox^1 + %o\" %o", FOO, a5,a4,a3,a2,a1,a0, upper_limit);
     else
@@ -85,13 +90,14 @@ RunSmalljac := function(X, upper_limit)
         command := Sprintf("~/lpdata2 %o \"%ox^6 + %ox^5 + %ox^4 + %ox^3 + %ox^2 + %ox^1 + %o\" %o", FOO, a6,a5,a4,a3,a2,a1,a0, upper_limit);
     end if;
     System(command);
+
+    // Retrieve the data from the printed smalljac output file
     filename := Sprintf("%o_lpdata.txt", FOO);
     frobs := Split(Read(filename), "\n");
     return frobs;
 end function;
 
-// function to check the dimension of the 1-subspace of frob(p)
-// functions for setup
+// Given a finitely generated abelian group G, count the copies of Z/ell Z in G
 TorsionCounter := function(G, ell) // counts the copies of Z/ell Z in abelian G
     decomp := Invariants(G);
     count := 0;
@@ -103,6 +109,8 @@ TorsionCounter := function(G, ell) // counts the copies of Z/ell Z in abelian G
     return count;
 end function;
 
+// function to check the dimension of the 1-eigenspace of frob(p)
+// Here p is the prime, C is the curve, ell the torsion subgroup of interest, and poly is the characteristic polynomial of frob(p)
 OneSubspaceDim := function(p, C, ell, poly)
     if Evaluate(poly, 1) ne 0 then
         return 0;
@@ -115,4 +123,333 @@ OneSubspaceDim := function(p, C, ell, poly)
     Cp := ChangeRing(C, GF(p));
     Jp := Jacobian(Cp);
     return TorsionCounter(AbelianGroup(Jp), ell);
+end function;
+
+
+//////////////////////////////////////// GLOBAL METHODS ///////////////////////////////////////////
+
+// A global method for determining the image of galois is 
+// a method which looks at the curve over Q, or an extension thereof
+
+// Function checks if a subgroup of GSp4(F5) has a common 1-eigenspace
+HasRationalTorsion := function(group_label)
+    return L[group_label]`orbits[1][2] eq 1;
+end function;
+
+// I left off here -Andy
+
+// Function checks if a subgroup has a common 1-subspace which is always a 1- or (-1)-eigenspace    
+HasQuadraticTorsion := function(group_label)
+    if not(2 in {orbit[2] : orbit in L[group_label]`orbits}) then
+        return false;
+    end if;
+    
+    if [orbit[3] : orbit in L[group_label]`orbits | orbit[2] eq 2][1] lt 12 then
+        return true;
+    end if;
+    
+    // Need to look at eigenspaces - not yet implemented
+    fprintf std_err, "Group %o is a candidate with lots of quadratic 5-torsion", group_label;
+    return true;
+end function;
+
+PlausibleDees := function(conductor)
+    prime_factors := {tuple[1] : tuple in Factorization(conductor)};
+    Include(~prime_factors, -1);
+
+    candidates := {&*s : s in Subsets(prime_factors) | &*s ne 1};
+    
+    if conductor mod 2 eq 0 then
+        return candidates;
+    else
+        // candidate number fields cannot ramify 2
+        return {dee : dee in candidates | dee mod 4 eq 1};
+    end if;
+end function;
+
+DiscFromDee := function(d)
+    if d mod 4 eq 1 then
+        return d;
+    else
+        return 4 * d;
+    end if;
+end function;
+
+ImpossibleQuadraticTorsion := function(C, frobs)
+    candidates := PlausibleDees(Conductor(C));
+    
+    for i->elt in frobs do
+        // first check the characteristic polynomial
+        frobpoly := Split(elt, ",");
+        if #frobpoly eq 2 then
+            assert frobpoly[2] eq "?"; //missing data, bad prime
+            continue;
+        end if;
+        p := eval frobpoly[1];
+        if p lt 7 then
+            continue;
+        end if;
+        ap := eval frobpoly[2];
+        bp := eval frobpoly[3];
+        
+        S := PolynomialRing(IntegerRing(5));
+        frob_poly := S![p^2, p*ap, bp, ap, 1];
+        
+        if Evaluate(frob_poly, 1) ne 0 then // no 5-torsion over Fp
+            candidates := {d : d in candidates | KroneckerSymbol(DiscFromDee(d), p) ne 1};
+        end if;
+        
+        if #candidates eq 0 then
+            return true, candidates;
+        end if;
+    end for;
+    
+    return false, candidates;
+end function;
+
+function MakeAllVecs(m, ell)
+    if m eq 1 then
+        return [[k] : k in [0..(ell-1)]];
+    end if;
+
+    acc := [];
+    for j in [0..(ell-1)] do
+        acc := acc cat [[j] cat s : s in MakeAllVecs(m-1, ell)];
+    end for;
+    return acc;
+end function;
+
+function MakeLineReps(n, ell)
+    if n eq 1 then
+        return [[1]];
+    end if;
+    
+    new_stuff := [[1] cat s : s in MakeAllVecs(n-1, ell)];
+    old_stuff := [[0] cat s : s in MakeLineReps(n-1, ell)];
+    
+    return new_stuff cat old_stuff;
+end function;
+
+function LinearCombo(vecs, scalars)
+// vecs is a basis for the lattice, and scalars is a single vector in line_reps
+    acc := scalars[1] * vecs[1];
+    for j in [2..#vecs] do
+        acc := acc + scalars[j] * vecs[j];
+    end for;
+    return acc;
+end function;
+
+MumfordFromCoords := function(points, f)
+    if #points eq 2 then // degree 2 divisor
+        x1 := points[1][1];
+        y1 := points[1][2];
+        x2 := points[2][1];
+        y2 := points[2][2];
+
+        alpha := -(x1 + x2);
+        beta := x1*x2;
+
+        if Abs(x1 - x2) lt 10^(-10) then
+            fprime := Derivative(f);
+            gamma := Evaluate(fprime, x1) / (2*y1);
+            delta := y1 - gamma * x1;
+        else
+            gamma := (y2-y1)/(x2-x1);
+            delta := (y1*x2-y2*x1)/(x2-x1);
+        end if;
+
+        return <alpha, beta, gamma, delta>;
+    elif #points eq 1 then // degree 1 divisor, (u, v) = (x-x1, y1)
+        return points[1];  
+    end if;
+    
+    fprintf std_err, "MumfordFromCoords recieved %o points\n", #points;
+    return <>;
+end function;
+
+// Given a genus 2 curve and an ell, computes the ell-torsion of the Jacobian over C and
+// returns one point in each line (line = copy of Z/ellZ)
+function CTorsion(C, ell)
+    CF<i> := ComplexField(PRECISION);
+
+    Cx<x> := PolynomialRing(CF);
+    f := -Evaluate(DefiningPolynomial(C), [x, 0, 1]);
+    A := AnalyticJacobian(f);
+    M := BigPeriodMatrix(A);
+
+    v1 := Matrix(CF, 2, 1, [M[1][1],M[2][1]]);
+    v2 := Matrix(CF, 2, 1, [M[1][2],M[2][2]]);
+    v3 := Matrix(CF, 2, 1, [M[1][3],M[2][3]]);
+    v4 := Matrix(CF, 2, 1, [M[1][4],M[2][4]]);
+
+    line_reps := MakeLineReps(4,5);
+    
+    analytic_torsion_points := [LinearCombo([v1, v2, v3, v4], line_reps[j])/ell : j in [1..156]];
+    //torsion_points := [*FromAnalyticJacobian(pt, A): pt in analytic_torsion_points*];
+    algebraic_torsion_points := [**];
+    for pt in analytic_torsion_points do
+        try 
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
+        catch e
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
+            fprintf std_err, "Doubling trick saved %o!\n", C;
+        end try;
+    end for;
+    
+    return [*MumfordFromCoords(pt, f) : pt in algebraic_torsion_points*];
+end function;
+
+// Precondition: CFE has an element greater than THRESHOLD
+function RoundCFE(CFE)
+    if CFE[2] gt THRESHOLD then
+        return CFE[1];
+    else
+        return CFE[1] + 1 / RoundCFE(CFE[[2..#CFE]]);
+    end if;
+end function;
+
+// Given a good point, returns abgd rational such that u = x^2+ax+b and v = sqrt(dee)*(gx+d)
+// For degree 1 divisor, returns ab rational such that u = x - a and v = sqrt(dee)*b
+function RoundPoint(pt, dee)
+    if #pt eq 4 then
+        a := Re(pt[1]);
+        b := Re(pt[2]);
+        if dee lt 0 then
+            g := Im(pt[3]) / Sqrt(Abs(dee));
+            d := Im(pt[4]) / Sqrt(Abs(dee));
+        else
+            g := Re(pt[3]) / Sqrt(Abs(dee));
+            d := Re(pt[4]) / Sqrt(Abs(dee));
+        end if;
+        a := RoundCFE(ContinuedFraction(a*FUDGE));
+        b := RoundCFE(ContinuedFraction(b*FUDGE));
+        g := RoundCFE(ContinuedFraction(g*FUDGE));
+        d := RoundCFE(ContinuedFraction(d*FUDGE));
+        return <a,b,g,d>;
+    elif #pt eq 2 then
+        a := Re(pt[1]);
+        if dee lt 0 then
+            b := Im(pt[2]) / Sqrt(Abs(dee));
+        else
+            b := Re(pt[2]) / Sqrt(Abs(dee));
+        end if;
+        a := RoundCFE(ContinuedFraction(a*FUDGE));
+        b := RoundCFE(ContinuedFraction(b*FUDGE));
+        return <a, b>;
+    end if;
+    fprintf std_err, "RoundPoint recieved mumford coord tuple with %o values\n", #pt;
+    return <>;
+end function;
+
+// Checks whether the continued fraction expansion of a real number r has term greater than THRESHOLD
+function NearlyRational(r)
+    if Abs(r) lt ZEROISH then 
+        return true;
+    end if;
+    
+    // the idea is that if r is EXACTLY an integer/neat fraction,
+    // this will add a big term to its CFE
+    r := r * FUDGE;
+    
+    for n in ContinuedFraction(r) do
+        if n gt THRESHOLD then
+            return true;
+        end if;
+    end for;
+    return false;
+end function;
+
+// takes in <alpha, beta, gamma, delta> and d and tells whether <alpha, beta, gamma, delta> 
+// could plausibly be the mumford coordinates of a torsion point over Q(sqrt(d))
+function PlausiblePoint(pt, dee)
+    if #pt eq 4 then // degree 2 divisor
+        if (dee lt 0) and Abs(Im(pt[1]))+Abs(Im(pt[2]))+Abs(Re(pt[3]))+Abs(Re(pt[4])) lt ZEROISH then
+            a := Re(pt[1]);
+            b := Re(pt[2]);
+            g := Im(pt[3]) / Sqrt(Abs(dee));
+            d := Im(pt[4]) / Sqrt(Abs(dee));
+            return NearlyRational(a) and NearlyRational(b) and NearlyRational(g) and NearlyRational(d);
+
+        elif (dee gt 0) and Abs(Im(pt[1]))+Abs(Im(pt[2]))+Abs(Im(pt[3]))+Abs(Im(pt[4])) lt ZEROISH then
+            a := Re(pt[1]);
+            b := Re(pt[2]);
+            g := Re(pt[3]) / Sqrt(Abs(dee));
+            d := Re(pt[4]) / Sqrt(Abs(dee));
+            return NearlyRational(a) and NearlyRational(b) and NearlyRational(g) and NearlyRational(d);
+        end if;
+    
+        return false;
+    elif #pt eq 2 then // degree 1 divisor
+        if (dee lt 0) and Abs(Im(pt[1]))+Abs(Re(pt[2])) lt ZEROISH then
+            a := Re(pt[1]);
+            b := Im(pt[2]) / Sqrt(Abs(dee));
+            return NearlyRational(a) and NearlyRational(b);
+        elif (dee gt 0) and Abs(Im(pt[1]))+Abs(Im(pt[2])) lt ZEROISH then
+            a := Re(pt[1]);
+            b := Re(pt[2]) / Sqrt(Abs(dee));
+            return NearlyRational(a) and NearlyRational(b);
+        end if;
+        
+        return false;
+    end if;
+    
+    fprintf std_err, "PlausiblePoint recieved mumford coord tuple with %o values\n", #pt;
+    return false;
+end function;
+
+// Given pt = <a, b, g, d> with abgd rational, tells whether 
+// (u, v) = (x^2+ax+b, sqrt(dee)*(gx+d)) is a 5-torsion point on the curve C
+// OR takes pt = <a, b> with ab rational and tells whether
+// (u, v) = (x-a, sqrt(d)*b) is a 5-torsion point
+function Is5Torsion(pt, dee, C)
+    _<x> := PolynomialRing(Rationals());
+    K<sqrtdee> := NumberField(x^2-dee);
+    Kx<xK> := PolynomialRing(K);
+    CK := ChangeRing(C, K);
+    JK := Jacobian(CK);
+    
+    if #pt eq 4 then
+        a := pt[1];
+        b := pt[2];
+        g := pt[3];
+        d := pt[4];
+
+        // See if 5*pt is Id, with the understanding that coersion may fail
+        try
+            return 5 * (JK ! [xK^2 + a*xK + b, sqrtdee*(g*xK + d)]) eq Id(JK);
+        catch e
+            fprintf std_err, "Is5Torsion decided no, given %o, %o, %o as input \n", pt, dee, C;
+            return false;
+        end try;
+    elif #pt eq 2 then
+        a := pt[1];
+        b := pt[2];
+        
+        // See if 5*pt is Id, with the understanding that coersion may fail
+        try
+            return 5 * (JK ! [xK - a, sqrtdee*b]) eq Id(JK);
+        catch e
+            fprintf std_err, "Is5Torsion decided no, given %o, %o, %o as input \n", pt, dee, C;
+            return false;
+        end try;
+    end if;
+    
+    fprintf std_err, "Is5Torsion recieved mumford coord tuple with %o values\n", #pt;
+    return false;
+end function;
+
+// Determines whether the curve C : y^2=f(x) has 5 torsion in Q(sqrt(dee))
+// true is always correct, and accompanied by a witness 5-torsion point
+// false may not be correct, although this is unlikely. False negatives can
+// be caused by extremely large 5-torsion (large in the height sense)
+function Has5Torsion(C, dee)
+    all_torsion := CTorsion(C, 5);
+    good_torsion := [*RoundPoint(pt, dee) : pt in all_torsion | PlausiblePoint(pt, dee)*];
+    
+    for pt in good_torsion do
+        if Is5Torsion(pt, dee, C) then
+            return true, pt;
+        end if;
+    end for;
+    return false;
 end function;
