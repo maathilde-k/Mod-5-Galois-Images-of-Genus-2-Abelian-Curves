@@ -5,6 +5,7 @@ The algorithm is described in the paper "Computing Mod-5 Galois Images of Torsio
 All code provided is written in Magma.
 Note that the primary implementation relies on Andrew Sutherland's [Smalljac](https://math.mit.edu/~drew/smalljac.html) and this may require separate configuration.
 An alternative (but much slower) method is provided which does require Smalljac.
+To be consistent with the labeling in LMFDB, we use the same subgroup lattice. This is constructed in the file GSp.m and was written by Andrew Sutherland.
 
 ## Acknowledgements
 
