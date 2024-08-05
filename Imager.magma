@@ -1,0 +1,118 @@
+/////////////////////////////////////// SETUP ///////////////////////////////////////////
+
+// Attach Sutherland's code to construct the labelling used in LMFDB and create the subgroup lattice
+// for GSp4(F5) using that code.
+Attach("GSp.m");
+L := GSpLattice(4, 5, 0);
+
+/////////////////////////////////////// LOCAL METHODS ///////////////////////////////////////////
+
+// A local method for determining images is one based on sampling Frob_p
+
+// Given a matrix M, this computes the dimension of the 1-eigenspace of M
+MatrixOneEigenspace := function(M)
+    eigenspace := Eigenspace(M, 1);
+    return Dimension(eigenspace);
+end function;
+
+// Given a finite matrix group MG, returns a list of the invariant pairs (charpoly, dim 1-eigenspace)
+// that occur in MG WITHOUT their multiplicity
+InvariantsUncounted := function(MG)
+    return {<CharacteristicPolynomial(M), MatrixOneEigenspace(M)> : M in MG};
+end function;
+
+// Given a finite matrix group MG, computes the invariant pairs (charpoly, dim 1-eigenspace)
+// that occur in MG. Note we include multiplicity/count of each pair.
+InvariantSpectrum := function(MG) // MG is a finite matrix group
+    invariant_tuples := {*<CharacteristicPolynomial(M), MatrixOneEigenspace(M)>: M in MG*};
+    return invariant_tuples;
+end function;
+
+// Given a subgroup lattice L, this constructs a dictionary. The keys are (charpoly, 1-eigenspace dim) pairs
+// and the values are lists of indices representing which subgroups contain
+// elements with those invariants. Note we only ever compute this on the subgroup lattice for GSp4(F5)
+InvariantDictionary := function(L);
+    num_subgroups := #L;
+    dict := AssociativeArray();
+    for grp in Keys(L) do
+        invariants := InvariantsUncounted(L[grp]`subgroup);
+        for invariant_tuple in invariants do
+            if not IsDefined(dict, invariant_tuple) then
+                dict[invariant_tuple] := {grp, "1.1.1"};
+            else
+                Include(~dict[invariant_tuple], grp);
+            end if;
+        end for;
+    end for;
+    return dict;
+end function;
+
+// Given two vectors in R^n, we compute the square of their Euclidean distance.
+// This is Algorithm 3 in our paper.
+SquareDifference := function(sampled, expected)
+    S := 1/#sampled;
+    E := 1/#expected;
+
+    sum := 0;
+    for elt in Set(expected) do
+        if elt in Set(sampled) then
+            sum := sum + (Multiplicity(expected, elt)*E - Multiplicity(sampled, elt)*S)^2;
+        else
+            sum := sum + (Multiplicity(expected, elt)*E)^2;
+        end if;
+    end for;
+    return sum;
+end function;
+
+// I left off here -Andy
+
+RunSmalljac := function(X, upper_limit)
+    // First ensure that the curve is simplified:
+    f,_:= HyperellipticPolynomials(X);
+
+    // Now run the command in smalljac
+    coeffs := Coefficients(f);
+    a0 := coeffs[1];
+    a1 := coeffs[2];
+    a2 := coeffs[3];
+    a3 := coeffs[4];
+    a4 := coeffs[5];
+    a5 := coeffs[6];
+    if #coeffs eq 6 then
+        command := Sprintf("~/lpdata2 %o \"%ox^5 + %ox^4 + %ox^3 + %ox^2 + %ox^1 + %o\" %o", FOO, a5,a4,a3,a2,a1,a0, upper_limit);
+    else
+        a6 := coeffs[7];
+        command := Sprintf("~/lpdata2 %o \"%ox^6 + %ox^5 + %ox^4 + %ox^3 + %ox^2 + %ox^1 + %o\" %o", FOO, a6,a5,a4,a3,a2,a1,a0, upper_limit);
+    end if;
+    System(command);
+    filename := Sprintf("%o_lpdata.txt", FOO);
+    frobs := Split(Read(filename), "\n");
+    return frobs;
+end function;
+
+// function to check the dimension of the 1-subspace of frob(p)
+// functions for setup
+TorsionCounter := function(G, ell) // counts the copies of Z/ell Z in abelian G
+    decomp := Invariants(G);
+    count := 0;
+    for val in decomp do
+        if (val mod ell) eq 0 then
+            count := count + 1;
+        end if;
+    end for;
+    return count;
+end function;
+
+OneSubspaceDim := function(p, C, ell, poly)
+    if Evaluate(poly, 1) ne 0 then
+        return 0;
+    end if;
+    
+    if [t[2] : t in Roots(poly) | t[1] eq 1][1] eq 1 then
+        return 1; // 1 has algebraic multiplicity 1, so it has geometric multiplicity 1
+    end if;
+    
+    Cp := ChangeRing(C, GF(p));
+    Jp := Jacobian(Cp);
+    return TorsionCounter(AbelianGroup(Jp), ell);
+end function;
