@@ -67,6 +67,7 @@ end function;
 
 // Takes a genus 2 hyperelliptic curve X and an upper limit on the number of primes to sample (ie sample the primes p < upper_limit)
 // and returns a list with the coefficients of the characteristic polynomial for each sampled frobenius element
+// Currently configured to print the smalljac output into a file called "FOO_lpdata2"
 RunSmalljac := function(X, upper_limit)
     // First ensure that the curve is simplified:
     C := SimplifiedModel(X);
@@ -97,8 +98,8 @@ RunSmalljac := function(X, upper_limit)
     return frobs;
 end function;
 
-// Given a finitely generated abelian group G, count the copies of Z/ell Z in G
-TorsionCounter := function(G, ell) // counts the copies of Z/ell Z in abelian G
+// Given a finitely generated abelian group G, counts the copies of Z/ell Z in G
+TorsionCounter := function(G, ell)
     decomp := Invariants(G);
     count := 0;
     for val in decomp do
@@ -109,17 +110,19 @@ TorsionCounter := function(G, ell) // counts the copies of Z/ell Z in abelian G
     return count;
 end function;
 
-// function to check the dimension of the 1-eigenspace of frob(p)
+// Checks the dimension of the 1-eigenspace of frob(p)
 // Here p is the prime, C is the curve, ell the torsion subgroup of interest, and poly is the characteristic polynomial of frob(p)
 OneSubspaceDim := function(p, C, ell, poly)
+    // First we check if we can determine the dimension based solely on the characteristic polynomial:
     if Evaluate(poly, 1) ne 0 then
         return 0;
     end if;
-    
     if [t[2] : t in Roots(poly) | t[1] eq 1][1] eq 1 then
         return 1; // 1 has algebraic multiplicity 1, so it has geometric multiplicity 1
     end if;
-    
+
+    // If we can't fully determine the dimension just from the characteristic polynomial then we look at
+    // the curve C mod p
     Cp := ChangeRing(C, GF(p));
     Jp := Jacobian(Cp);
     return TorsionCounter(AbelianGroup(Jp), ell);
@@ -136,10 +139,35 @@ HasRationalTorsion := function(group_label)
     return L[group_label]`orbits[1][2] eq 1;
 end function;
 
-// I left off here -Andy
+// For a prime ell, returns a list of all vectors in (Z/ell Z)^m
+function MakeAllVecs(m, ell)
+    if m eq 1 then
+        return [[k] : k in [0..(ell-1)]];
+    end if;
+
+    acc := [];
+    for j in [0..(ell-1)] do
+        acc := acc cat [[j] cat s : s in MakeAllVecs(m-1, ell)];
+    end for;
+
+    return acc;
+end function;
+
+// For a prime ell, returns a list with one representative of each 1D subspace in (Z/ell Z)^n
+function MakeLineReps(n, ell)
+    if n eq 1 then
+        return [[1]];
+    end if;
+    
+    new_stuff := [[1] cat s : s in MakeAllVecs(n-1, ell)];
+    old_stuff := [[0] cat s : s in MakeLineReps(n-1, ell)];
+    
+    return new_stuff cat old_stuff;
+end function;
+
 
 // Function checks if a subgroup has a common 1-subspace which is always a 1- or (-1)-eigenspace    
-HasQuadraticTorsion := function(group_label)
+HasQuadraticTorsion := function(group_label, ell)
     if not(2 in {orbit[2] : orbit in L[group_label]`orbits}) then
         return false;
     end if;
@@ -147,12 +175,26 @@ HasQuadraticTorsion := function(group_label)
     if [orbit[3] : orbit in L[group_label]`orbits | orbit[2] eq 2][1] lt 12 then
         return true;
     end if;
-    
-    // Need to look at eigenspaces - not yet implemented
-    fprintf std_err, "Group %o is a candidate with lots of quadratic 5-torsion", group_label;
+
+    ListToVerticalVector := function(list, ell)
+        return Transpose(Matrix(Vector(IntegerRing(ell), list)));
+    end function;
+
+    possible_subspaces := MakeLineReps(4, ell);
+    for gen in Generators(L[group_label]`subgroup) do
+        possible_subspaces := [subspace : subspace in possible_subspaces |
+            (gen * ListToVerticalVector(subspace, ell) eq ListToVerticalVector(subspace, ell)) 
+            or (gen * ListToVerticalVector(subspace, ell) eq (-1) * ListToVerticalVector(subspace, ell)) ];
+        if #possible_subspaces eq 0 then
+            return false;
+        end if;
+    end for;
     return true;
 end function;
 
+
+// Initializes possibilities for which quadratic extensions of Q(sqrt(d))/Q might have additional 5-torsion.
+// This is Step 1 in Algorithm 4
 PlausibleDees := function(conductor)
     prime_factors := {tuple[1] : tuple in Factorization(conductor)};
     Include(~prime_factors, -1);
@@ -167,6 +209,7 @@ PlausibleDees := function(conductor)
     end if;
 end function;
 
+// Given Q(sqrt(d))/Q compute the discriminant
 DiscFromDee := function(d)
     if d mod 4 eq 1 then
         return d;
@@ -174,6 +217,16 @@ DiscFromDee := function(d)
         return 4 * d;
     end if;
 end function;
+
+// Checks if a curve C could have additional 5-torsion over a quadratic extension Q(sqrt(d))/Q.
+// Returns true if no quadratic torsion guaranteed.
+// Returns false if we might have additional 5-torsion over a quadratic extension.
+// In this case, we also return the set {d : Q(sqrt(d)) might have 5-torsion}
+// This is Algorithm 4 in our paper
+
+// Need to rewrite function with the frobpoly stuff moved into its own function separately.
+
+// I left off here -Andy
 
 ImpossibleQuadraticTorsion := function(C, frobs)
     candidates := PlausibleDees(Conductor(C));
@@ -207,28 +260,7 @@ ImpossibleQuadraticTorsion := function(C, frobs)
     return false, candidates;
 end function;
 
-function MakeAllVecs(m, ell)
-    if m eq 1 then
-        return [[k] : k in [0..(ell-1)]];
-    end if;
 
-    acc := [];
-    for j in [0..(ell-1)] do
-        acc := acc cat [[j] cat s : s in MakeAllVecs(m-1, ell)];
-    end for;
-    return acc;
-end function;
-
-function MakeLineReps(n, ell)
-    if n eq 1 then
-        return [[1]];
-    end if;
-    
-    new_stuff := [[1] cat s : s in MakeAllVecs(n-1, ell)];
-    old_stuff := [[0] cat s : s in MakeLineReps(n-1, ell)];
-    
-    return new_stuff cat old_stuff;
-end function;
 
 function LinearCombo(vecs, scalars)
 // vecs is a basis for the lattice, and scalars is a single vector in line_reps
