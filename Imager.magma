@@ -223,31 +223,12 @@ end function;
 // Returns false if we might have additional 5-torsion over a quadratic extension.
 // In this case, we also return the set {d : Q(sqrt(d)) might have 5-torsion}
 // This is Algorithm 4 in our paper
-
-// Need to rewrite function with the frobpoly stuff moved into its own function separately.
-
-// I left off here -Andy
-
-ImpossibleQuadraticTorsion := function(C, frobs)
+ImpossibleQuadraticTorsion := function(C, frob_polys_list)
     candidates := PlausibleDees(Conductor(C));
-    
-    for i->elt in frobs do
-        // first check the characteristic polynomial
-        frobpoly := Split(elt, ",");
-        if #frobpoly eq 2 then
-            assert frobpoly[2] eq "?"; //missing data, bad prime
+    for frob_poly in frob_polys_list do
+        if coefficients(frob_poly)[1] lt 49 then
             continue;
         end if;
-        p := eval frobpoly[1];
-        if p lt 7 then
-            continue;
-        end if;
-        ap := eval frobpoly[2];
-        bp := eval frobpoly[3];
-        
-        S := PolynomialRing(IntegerRing(5));
-        frob_poly := S![p^2, p*ap, bp, ap, 1];
-        
         if Evaluate(frob_poly, 1) ne 0 then // no 5-torsion over Fp
             candidates := {d : d in candidates | KroneckerSymbol(DiscFromDee(d), p) ne 1};
         end if;
@@ -261,6 +242,7 @@ ImpossibleQuadraticTorsion := function(C, frobs)
 end function;
 
 
+// I left off here -Andy
 
 function LinearCombo(vecs, scalars)
 // vecs is a basis for the lattice, and scalars is a single vector in line_reps
