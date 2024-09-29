@@ -224,36 +224,43 @@ end function;
 // In this case, we also return the set {d : Q(sqrt(d)) might have 5-torsion}
 // This is Algorithm 4 in our paper
 ImpossibleQuadraticTorsion := function(C, frob_polys_list)
-    candidates := PlausibleDees(Conductor(C));
-    for frob_poly in frob_polys_list do
-        if coefficients(frob_poly)[1] lt 49 then
-            continue;
-        end if;
-        if Evaluate(frob_poly, 1) ne 0 then // no 5-torsion over Fp
-            candidates := {d : d in candidates | KroneckerSymbol(DiscFromDee(d), p) ne 1};
-        end if;
-        
-        if #candidates eq 0 then
-            return true, candidates;
-        end if;
-    end for;
+candidates := PlausibleDees(Conductor(C));
+for frob_poly in frob_polys_list do
+    if Coefficients(frob_poly)[1] lt 49 then
+        continue;
+    end if;
+    p := Integers()!Sqrt(Coefficients(frob_poly)[1]);
+    if Evaluate(frob_poly, 1) ne 0 then // no 5-torsion over Fp
+        candidates := {d : d in candidates | KroneckerSymbol(DiscFromDee(d), p) ne 1};
+    end if;
     
-    return false, candidates;
+    if #candidates eq 0 then
+        return true, candidates;
+    end if;
+end for;
+
+return false, candidates;
 end function;
 
 
-// I left off here -Andy
 
-function LinearCombo(vecs, scalars)
-// vecs is a basis for the lattice, and scalars is a single vector in line_reps
+
+function LinearCombo(vecs, scalars, ell)
+// vecs is a basis for the lattice of the analytic Jacobian, and scalars is an element in the vector-space
+// formulation of the torsion points. This function returns the torsion point corresponding to scalars
+// in the analytic jacobian
     acc := scalars[1] * vecs[1];
     for j in [2..#vecs] do
         acc := acc + scalars[j] * vecs[j];
     end for;
-    return acc;
+    return acc/ell;
 end function;
 
+
 MumfordFromCoords := function(points, f)
+// Given points [(x1,y1),(x2,y2)] on a dimension 2 jacobian we recover the mumford coordinates
+// These are presented in the form (x^2+alpha*x+beta, gamma*x+delta)
+// Requires reduced divisors of degree 1 or 2. Do not feed in the identity or unreduced divisors.
     if #points eq 2 then // degree 2 divisor
         x1 := points[1][1];
         y1 := points[1][2];
@@ -263,11 +270,12 @@ MumfordFromCoords := function(points, f)
         alpha := -(x1 + x2);
         beta := x1*x2;
 
-        if Abs(x1 - x2) lt 10^(-10) then
+        // special case when the divisor is of the form (2P - 2∞)
+        if Abs(x1 - x2) lt 10^(-10) then // threshold for floating point error
             fprime := Derivative(f);
             gamma := Evaluate(fprime, x1) / (2*y1);
             delta := y1 - gamma * x1;
-        else
+        else // the generic case
             gamma := (y2-y1)/(x2-x1);
             delta := (y1*x2-y2*x1)/(x2-x1);
         end if;
@@ -277,14 +285,14 @@ MumfordFromCoords := function(points, f)
         return points[1];  
     end if;
     
-    fprintf std_err, "MumfordFromCoords recieved %o points\n", #points;
+    fprintf std_err, "MumfordFromCoords recieved %o points\n", #points; // I think we should remove this since I don't think std_err will work in general -Andy
     return <>;
 end function;
 
 // Given a genus 2 curve and an ell, computes the ell-torsion of the Jacobian over C and
-// returns one point in each line (line = copy of Z/ellZ)
+// returns one point in each line (line = copy of Z/ellZ = 1D subspace)
 function CTorsion(C, ell)
-    CF<i> := ComplexField(PRECISION);
+    CF<i> := ComplexField(PRECISION); // sort out precision stuff -Andy
 
     Cx<x> := PolynomialRing(CF);
     f := -Evaluate(DefiningPolynomial(C), [x, 0, 1]);
@@ -298,23 +306,31 @@ function CTorsion(C, ell)
 
     line_reps := MakeLineReps(4,5);
     
-    analytic_torsion_points := [LinearCombo([v1, v2, v3, v4], line_reps[j])/ell : j in [1..156]];
-    //torsion_points := [*FromAnalyticJacobian(pt, A): pt in analytic_torsion_points*];
+    analytic_torsion_points := [LinearCombo([v1, v2, v3, v4], line_reps[j], ell) : j in [1..156]];
     algebraic_torsion_points := [**];
     for pt in analytic_torsion_points do
         try 
             Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
-        catch e
+        catch e 
             Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
             fprintf std_err, "Doubling trick saved %o!\n", C;
+        // we need degree 2 divisors for Magma to be happy with list comprehension so if this is not the case
+        // we double the point to get a degree two divisor
         end try;
     end for;
     
     return [*MumfordFromCoords(pt, f) : pt in algebraic_torsion_points*];
 end function;
 
-// Precondition: CFE has an element greater than THRESHOLD
+// I left off here -Andy
+
+// Precondition: CFE (continued fraction expansion) has an element greater than THRESHOLD
+// Note: CFE stands for continued fraction expansion. We can write any real number as a + (1/(b+1/(c+...)))
+// The input is a sequence of coefficients corresponding the the values in the CFE for a real number
+// The other input, height, is a height bound
 function RoundCFE(CFE)
+    if #CFE eq 2 then
+        return CFE[1]
     if CFE[2] gt THRESHOLD then
         return CFE[1];
     else
