@@ -322,15 +322,47 @@ function CTorsion(C, ell)
     return [*MumfordFromCoords(pt, f) : pt in algebraic_torsion_points*];
 end function;
 
-// I left off here -Andy
+
+// CFE stands for continued fraction expansion. We can write any real number as a + (1/(b+1/(c+...)))
+
+
+// we need a helper function which eats a full CFE (as a sequence) and a length n and returns the
+// corresponding rational number which we get by expanding the first n coefficients in the CFE
+function ExpandCFE(CFE, n)
+    if n eq 1 then
+        return CFE[1];
+    else
+        return CFE[1] + 1/(ExpandCFE(CFE[2..n],n-1));
+    end if;
+end function;
+
+// The input val is a real number which we computed to be a mumford coefficient
+// The input h is a height = max(numerator, denominator) bound on what is permissible for a 5-torsion point
+// The input err is a bound on the possible error of the FromAnalyticJacobian computation
+// The output is a list of possible rational approximations to be checked
+function RoundVal(val, h, err)
+    CFE = ContinuedFraction(val);
+    possible_approxs := [];
+    for n in [1..#CFE] do
+        approx := ExpandCFE(CFE,n);
+        err_bool := Abs(approx - val) le err;
+        height_bool := Max(Abs(Numerator(approx)), Abs(Denominator(approx)));
+        if (err_bool and height_bool) // check that we satisfy both the error bound and height bound
+            Append(~possible_approxs, approx);
+        end if;
+    end for;
+    return possible_approxs;
+end function;
+
 
 // Precondition: CFE (continued fraction expansion) has an element greater than THRESHOLD
 // Note: CFE stands for continued fraction expansion. We can write any real number as a + (1/(b+1/(c+...)))
 // The input is a sequence of coefficients corresponding the the values in the CFE for a real number
 // The other input, height, is a height bound
+
 function RoundCFE(CFE)
     if #CFE eq 2 then
-        return CFE[1]
+        return CFE[1];
     if CFE[2] gt THRESHOLD then
         return CFE[1];
     else
