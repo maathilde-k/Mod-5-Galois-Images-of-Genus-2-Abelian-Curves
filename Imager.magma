@@ -339,20 +339,35 @@ end function;
 // The input val is a real number which we computed to be a mumford coefficient
 // The input h is a height = max(numerator, denominator) bound on what is permissible for a 5-torsion point
 // The input err is a bound on the possible error of the FromAnalyticJacobian computation
-// The output is a list of possible rational approximations to be checked
+// The output is the computed CFE for val as well as the list of possible lengths. This may be empty!
 function RoundVal(val, h, err)
     CFE = ContinuedFraction(val);
-    possible_approxs := [];
+    allowed_err_lengths := [];
+    allowed_height_lengths := [];
     for n in [1..#CFE] do
         approx := ExpandCFE(CFE,n);
         err_bool := Abs(approx - val) le err;
         height_bool := Max(Abs(Numerator(approx)), Abs(Denominator(approx)));
-        if (err_bool and height_bool) // check that we satisfy both the error bound and height bound
-            Append(~possible_approxs, approx);
+
+        if err_bool then
+            Append(~allowed_err_lengths, n);
         end if;
-    end for;
-    return possible_approxs;
+        if height_bool then
+            Append(~allowed_height_lengths, n);
+        end if;
+
+    // We want to check if there are any allowable rational approximations. There are no allowable rational approximations when
+    // min(allowed_err) - max(allowed_heights) > 1
+    if (min(allowed_err_lengths) - max(allowed_height_lengths)) gt 1 then
+        return CFE, [];
+    elif (min(allowed_err_lengths) - max(allowed_height_lengths)) eq 1 then
+        return CFE, [max(allowed_height_lengths), min(allowed_err_lengths)]
+    else
+        return CFE, [i : i in [min(allowed_err_lengths)..max(allowed_height_lengths)]]
 end function;
+
+
+// left off here -Andy
 
 
 // Precondition: CFE (continued fraction expansion) has an element greater than THRESHOLD
