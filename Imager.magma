@@ -530,3 +530,149 @@ function Has5Torsion(C, dee)
     end for;
     return false;
 end function;
+
+////////////////////////////// IMAGING ///////////////////////////////////
+
+// Image of galois        Users must pass the dictionary in to save compute if trying several curves/primes
+
+ImageByFroblist := function(L, dict, C)
+    // First run the curve through smalljac:
+    C, _ := SimplifiedModel(C);
+    frobs := RunSmalljac(C, PRIMES_UPPER_LIMIT);
+        
+    // Removes the first line of the smalljac file which simply contains curve info
+    Remove(~frobs, 1);
+
+    possibilities := Keys(L);
+
+    ////////////////////////////// Compute local information //////////////////////////////
+
+    // Computing the distribution of (characteristic polynimial, dim 1-eigenspace)
+    invariant_counts := {**};
+
+    S<x> := PolynomialRing(IntegerRing(5));
+    for i->elt in frobs do
+        // first check the characteristic polynomial
+        frobpoly := Split(elt, ",");
+        if #frobpoly eq 2 then
+            assert frobpoly[2] eq "?"; //missing data, bad prime
+            continue;
+        end if;
+        p := eval frobpoly[1];
+        if p lt PRIMES_LOWER_LIMIT then
+            continue;
+        end if;
+        ap := eval frobpoly[2];
+        bp := eval frobpoly[3];
+        
+        frob_poly := S![p^2, p*ap, bp, ap, 1];
+
+        // Now we check the dimension of the 1-eigenspace
+        dim_one_eigenspace := OneSubspaceDim(p, C, 5, frob_poly);
+
+        invariants := <frob_poly, dim_one_eigenspace>;
+        
+        // Intersect its dictionary entry with possibilities list
+        possibilities := possibilities meet dict[invariants];
+        // If only one possibility, return surjective
+        if #possibilities eq 1 then
+            return "1.1.1";
+        end if;
+
+        // Add invariant tuple to count
+        Include(~invariant_counts,invariants);
+    end for;
+
+    possibilities := possibilities diff {"1.1.1"};
+    best_p := 2;
+    best_subgroups := [];
+
+    // if non-surjective, compare empirical and actual distributions of (characteristic polynimial, dim 1-eigenspace)
+    for index in possibilities do
+        test_stat := SquareDifference(invariant_counts, InvariantSpectrum(L[index]`subgroup));
+        if Abs(test_stat - best_p) lt 0.001 then
+            Append(~best_subgroups, index);
+        elif test_stat lt best_p then
+            best_p := test_stat;
+            best_subgroups := [index];
+        end if;
+    end for;
+
+    ////////////////////////////// Compute global information //////////////////////////////
+
+    // filter isomorphic non-conjugage subgroups by presence or absence of rational 5-torsion
+    if (#TorsionSubgroup(Jacobian(C))) mod 5 eq 0 then
+        best_subgroups := {sg : sg in best_subgroups | HasRationalTorsion(sg)};
+        best_subgroups;
+    else
+        best_subgroups := {sg : sg in best_subgroups | not(HasRationalTorsion(sg))};
+
+        // filter isomorphic non-conjugage subgroups by presence or absence of simple-quadratic 5-torsion
+        num_with_quadratic := #{sg : sg in best_subgroups | HasQuadraticTorsion(sg)};
+        // check if computing quadratic five-torsion will yield useful information
+        if num_with_quadratic gt 0 and num_with_quadratic lt #best_subgroups then 
+            // compute the candidate ds for the quadratic extensions Q(\root{d})
+            _, possibilities := ImpossibleQuadraticTorsion(C, frobs);
+            if #possibilities eq 0 then
+                best_subgroups := {sg : sg in best_subgroups | not(HasQuadraticTorsion(sg))};
+            else
+                for dee in possibilities do
+                    try 
+                        // if we can find simple quadratic 5-torsion points over Q(\root{d}), we restrict best_subgroups
+                        // else, it might be a flase negative so we do not retrict best_subgroups
+                        if Has5Torsion(C, dee) then
+                            best_subgroups := {sg : sg in best_subgroups | HasQuadraticTorsion(sg)};
+                            break;
+                        //else
+                            //fprintf std_err, "torsion expected on curve %o over Q(sqrt(%o)), but none found\n", C, dee;
+                        end if;
+                    catch e 
+                        fprintf std_err, "FAJ or something errored on %o\n", C;
+                        fprintf std_err, "%o\n", e;
+                    end try; // FromAnalyticJacobian randomly errors sometimes
+                end for;
+            end if;
+        end if;
+    end if;
+
+    return best_subgroups;
+end function;
+
+////////////////////////////////////// RUNNING SCRIPT ///////////////////////////////////
+
+// import Drew's lattice code.
+Attach("/projects/41d9a393-6a13-4259-bc6e-fa8eb804117b/threetorsimage/GSp.m");
+print "Computing subgroup lattice...";
+L := GSpLattice(4, 5, 0);
+print "Done computing subgroup lattice.";
+
+// Compute the characteristic dictionary
+print "Comupting dictionary of frob polys...";
+dict := InvariantDictionary(L);
+print "Done computing dictionary of frob polys...";
+
+R<x> := PolynomialRing(Rationals());
+
+file := Open(OUTPUT_FILENAME, MODE);
+std_err := Open(STD_ERR, MODE);
+
+// CHECK THIS LINE BEFORE RUNNING
+load "./Galois-representations-REU/LMFDB_typical_nonsurjective_data";
+
+image_to_curve := AssociativeArray();
+for curve_info in data do 
+    if #curve_info[#curve_info] eq 1 then
+        C := HyperellipticCurve(R!curve_info[#curve_info][1]);
+    else
+        C := HyperellipticCurve(R!curve_info[#curve_info][1], R!curve_info[#curve_info][2]);
+    end if;
+    
+    im := ImageByFroblist(L, dict, C);
+    
+    if im in Keys(image_to_curve) then
+        Append(~image_to_curve[im], curve_info[1]);
+    else 
+        image_to_curve[im] := [curve_info[1]];
+    end if;
+    fprintf file, "%o,%o\n", curve_info[1], im;
+end for;
