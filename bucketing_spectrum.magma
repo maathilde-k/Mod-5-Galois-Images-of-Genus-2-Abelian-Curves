@@ -1,0 +1,65 @@
+// import Drew's lattice code
+Attach("/projects/41d9a393-6a13-4259-bc6e-fa8eb804117b/threetorsimage/GSp.m");
+
+L := GSpLattice(4, 5, 0);
+
+Remove(~L, "1.1.1");
+
+// Given a finite matrix group, computes the characteristic polynomial and 
+// eigenspace dimensions of the elements (only for eigenvalues in ground field)
+CharDimSpectrum := function(MG) // MG is a finite matrix group
+    return {* <CharacteristicPolynomial(M), Dimension(Eigenspace(M, 1))>: M in MG *};
+end function;
+
+Likelihood := function(sampled, expected)
+    E := 1/#expected;
+    prob := 0;
+    is_possible := true;
+
+    for elt in Set(sampled) do
+        if Multiplicity(expected, elt) eq 0 then
+            is_possible := false;
+            continue;
+        end if;
+        prob := prob + Log(Multiplicity(expected, elt)*E)*Multiplicity(sampled, elt);
+    end for;
+    return is_possible, prob;
+end function;
+
+//////////////////////////// ^^ SETUP ^^ ///////////////////////////////
+////////////////////////// vv bucketer vv //////////////////////////////
+
+print "Calculating spectra";
+specs := AssociativeArray();
+for grp_name in Keys(L) do
+    specs[grp_name] := CharDimSpectrum(L[grp_name]`subgroup);
+end for;
+print "Spectra calculated";
+
+print "Bucketing";
+S := [];
+for grp1 in Keys(L) do
+    bucket := [];
+    best_likelihood := 1;
+    for grp2 in Keys(L) do
+        is_possible, cur_likelihood := Likelihood(specs[grp1], specs[grp2]);
+			if is_possible eq false then
+				continue;
+			end if;
+        if best_likelihood eq 1 then
+    		best_likelihood := cur_likelihood;
+    		bucket := [grp2];
+    	elif Abs(cur_likelihood - best_likelihood) lt 0.0001 then
+    		Append(~bucket, grp2);		
+    	elif cur_likelihood gt best_likelihood then
+    		best_likelihood := cur_likelihood;
+    		bucket := [grp2];
+    	end if;
+    end for;
+    Append(~S, Set(bucket));
+end for;
+print "Done bucketing";
+
+S := Set(S);
+
+#S
