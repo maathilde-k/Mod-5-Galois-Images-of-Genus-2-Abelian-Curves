@@ -1,3 +1,8 @@
+// import Drew's lattice code
+Attach("/projects/41d9a393-6a13-4259-bc6e-fa8eb804117b/threetorsimage/GSp.m");
+L := GSpLattice(4, 5, 0);
+Remove(~L, "1.1.1");
+
 // Given a finite matrix group, computes the characteristic polynomial and 
 // eigenspace dimensions of the elements (only for eigenvalues in ground field)
 CharDimSet := function(MG) // MG is a finite matrix group
