@@ -292,6 +292,35 @@ MumfordFromCoords := function(points, f)
     return <>;
 end function;
 
+// Given a the first mumford coordinate (x^2 + alpha*x+beta), recover the possible second coordinates which satisfy
+// a curve C: Y^2 = f(X)
+function ComputeGammaDelta(alpha, beta, C)
+    // ensure we have Y^2 = f(X)
+    C := SimplifiedModel(C);
+
+    // we will compute the x-coords in the quadratic extension in which they live.
+    disc := alpha^2 -4*beta;
+    K1 := QuadraticField(disc);
+    sqrt_disc := K1.1;
+    x1 := (-alpha + sqrt_disc)/2;
+    x2 := (-alpha - sqrt_disc)/2;
+
+    // Now we want to compute the y-coords. They are sqrt(f(x)), so first we compute f(x)
+    S<x,y,z> := PolynomialRing(K1,3);
+    def_poly := S!DefiningPolynomial(C);
+    fx1 := Evaluate(def_poly, [x1, 0, 1]);
+    fx2 := Evaluate(def_poly, [x2, 0,1]);
+
+    // We need additional quadratic extensions to get sqrt(f(x)):
+    L1 := QuadraticField(K1, fx1);
+    sqrt_fx1 := L1.1;
+    L2 := QuadraticField(K1, fx2);
+    sqrt_fx2 := L2.1;
+    y1 := sqrt
+    
+    
+    
+
 // Algorithm 6
 function SimpleQuadTorsFinder(C, frob_poly_list)
     existence, possibilities := ImpossibleQuadraticTorsion(C, frob_poly_list);
@@ -346,7 +375,8 @@ function SimpleQuadTorsFinder(C, frob_poly_list)
 
         // build a helper function
         
-    
+
+
         
 
 
