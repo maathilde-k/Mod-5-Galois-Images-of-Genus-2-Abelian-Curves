@@ -243,6 +243,9 @@ return false, candidates;
 end function;
 
 
+// This checks if a complex number (represented as a pair of floating point reals) could be represented as a rational number
+// of bounded height H with error at most epsilon. This is Algorithm 5 in the paper.
+   
 
 
 function LinearCombo(vecs, scalars, ell)
@@ -288,6 +291,64 @@ MumfordFromCoords := function(points, f)
     fprintf std_err, "MumfordFromCoords recieved %o points\n", #points; // I think we should remove this since I don't think std_err will work in general -Andy
     return <>;
 end function;
+
+// Algorithm 6
+function SimpleQuadTorsFinder(C, frob_poly_list)
+    existence, possibilities := ImpossibleQuadraticTorsion(C, frob_poly_list);
+    // recall existence is a boolean which is true if simple quadratic torsion is impossible
+    if existence then
+        return false;
+    end if;
+
+    height_bounds := {};
+    for dee in possibilities do:
+        Include(~heigh_bounds, height(dee)); // fix this line once we have functioning height code
+    end for;
+    h := Max(height_bounds);
+
+    CF<i> := ComplexField(PRECISION); // sort out precision stuff -Andy
+    Cx<x> := PolynomialRing(CF);
+    f := -Evaluate(DefiningPolynomial(C), [x, 0, 1]);
+    A := AnalyticJacobian(f);
+    M := BigPeriodMatrix(A);
+    v1 := Matrix(CF, 2, 1, [M[1][1],M[2][1]]);
+    v2 := Matrix(CF, 2, 1, [M[1][2],M[2][2]]);
+    v3 := Matrix(CF, 2, 1, [M[1][3],M[2][3]]);
+    v4 := Matrix(CF, 2, 1, [M[1][4],M[2][4]]);
+
+    line_reps := MakeLineReps(4,5);
+    all_torsion := [LinearCombo([v1, v2, v3, v4], line_reps[j], ell) : j in [1..156]];
+    algebraic_torsion_points := [**];
+    for pt in all_torsion do
+        try 
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
+        catch e 
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
+        // we need degree 2 divisors for Magma to be happy with list comprehension so if this is not the case
+        // we double the point to get a degree two divisor
+        end try;
+    end for;
+
+    good_torsion := [];
+
+    for point in algebraic_torsion_points do:
+        alpha := point[1][1];
+        beta := point[1][2];
+        approx_alpha := algo5(alpha); // fix with real algo name
+        approx_beta := algo5(beta); // fix with real algo name
+
+        if (#approx_alpha eq 0) or (#approx_beta eq 0) then // check that we have rational approximations
+            continue;
+        end if;
+        // if we do, replace alpha and beta with their approximations
+        alpha := approx_alpha[1];
+        beta := approx_beta[1];
+
+        // build a helper function
+        
+    
+        
+
 
 // Given a genus 2 curve and an ell, computes the ell-torsion of the Jacobian over C and
 // returns one point in each line (line = copy of Z/ellZ = 1D subspace)
