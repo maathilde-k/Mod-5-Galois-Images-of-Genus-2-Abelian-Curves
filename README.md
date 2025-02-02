@@ -1,4 +1,4 @@
-# Computing Mod-5 Galois Images of Torsion on Abelian Surfaces
+# Computing mod-5 Galois images of torsion on abelian surfaces
 
 This repository contains code for computing the mod-5 image of the Galois Representation of torsion for the Jacobian of a genus 2 hyperelliptic curve.
 The algorithm is described in the paper "Computing mod-5 Galois images of torsion on abelian surfaces" by Andy Zhu, Mathilde Kermorgant, and Aidan Hennessey.
