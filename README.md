@@ -9,7 +9,7 @@ To be consistent with the labeling in LMFDB, we use the same subgroup lattice. T
 
 The primary algorithm is contained in imager.m, while other computational results referenced in our paper have code to verify located in paper-lemmas.
 
-# Sample Code
+## Sample Code
 
 To run a particular curve, use the following block:
 ```magma
