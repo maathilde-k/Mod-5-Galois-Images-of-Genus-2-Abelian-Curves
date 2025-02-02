@@ -1,4 +1,5 @@
 ////////////////////////////////////// CONSTANTS ///////////////////////////////////////
+
 // Where to write error messages which shouldn't cause termination (stays separate from smalljac output)
 STD_ERR := "errors.txt";
 // "w" to overwrite, "a" to append
@@ -158,6 +159,7 @@ end function;
 // a method which looks at the curve over Q, or an extension thereof
 
 // Function checks if a subgroup of GSp4(F5) has a common 1-eigenspace
+// the group label should be input as a string, eg HasRationalTorsion("5.624.1")
 HasRationalTorsion := function(group_label)
     return L[group_label]`orbits[1][2] eq 1;
 end function;
@@ -251,12 +253,13 @@ DiscFromDee := function(d)
     end if;
 end function;
 
+
 // This is Algorithm 4 in our paper
 // This function takes in a curve C and a list of frobenius polynomials frobs (obtained from
 // the prior function "runsmalljac") and determines if the curve C could have additional 5-torsion over
 // a quadratic extension. If this is impossible, the function returns true. If there could be 5-torsion
 // over some quadratic extension, the function returns false and a list of candidates
-// {d : Q(sqrt(d)) could have additional 5-torsion}
+// {d : Q(sqrt(d)) might have additional 5-torsion}
 ImpossibleQuadraticTorsion := function(C, frobs)
     candidates := PlausibleDees(Conductor(C));
     
@@ -292,7 +295,7 @@ end function;
 // HELPER FOR ALGORITHM 5
 // Best rational approximation for r with denominator bounded by H
 // Using result of stack exchange user Stingy: https://math.stackexchange.com/questions/856861/semi-convergent-of-continued-fractions
-// Alternatively see page 22 of Khinchin's Continued Fractions
+// Alternatively, this is on page 22 of Khinchin's Continued Fractions
 function BestApproximation(r, H)
     // Generate continued fraction expansion
     CFE := ContinuedFraction(r);
@@ -595,8 +598,8 @@ function ComputeGammaDelta(alpha, beta, C)
 //    delta3 := -gamma3*x1 - y1;
 //    gamma4 := (-y1 + y2)/(x1-x2); // this is just the inverse of (gamma1, delta1)
 //    delta4 := -gamma4*x1 - y1;
-// since the last two possibilities are recoverable from the first two, we only 
-// include them in comments for clarity
+// because we can recover the last two possibilities from the first two, we omit them.
+// they are written in comments for you, dear reader
     
     return [<gamma1, delta1>, <gamma2, delta2>];
 end function;
