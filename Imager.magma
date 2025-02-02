@@ -1,3 +1,27 @@
+////////////////////////////////////// CONSTANTS ///////////////////////////////////////
+
+// Where to write error messages which shouldn't cause termination (stays separate from smalljac output)
+STD_ERR := "errors.txt";
+// "w" to overwrite, "a" to append
+MODE := "w";
+
+std_err := Open(STD_ERR, MODE); // we do this here so that any function can see this name
+
+// the temp file Smalljac writes to
+// Note: the lack of .txt in our example name is intentional.
+FOO := "temp";
+
+// the range of p for which Frob_p will be sampled
+PRIMES_LOWER_LIMIT := 10000;
+PRIMES_UPPER_LIMIT := 20000;
+
+// The minimal number of decimal digits to use in computations
+// related to inverting Abel-Jacobi. Lower values lead to more
+// frequent errors during inversion. We do not know why these
+// errors occur in the first place. High precisions may cause
+// the computation to stall.
+MIN_PRECISION := 200;
+
 /////////////////////////////////////// SETUP ///////////////////////////////////////////
 
 // Attach Sutherland's code to construct the labelling used in LMFDB and create the subgroup lattice
@@ -135,6 +159,7 @@ end function;
 // a method which looks at the curve over Q, or an extension thereof
 
 // Function checks if a subgroup of GSp4(F5) has a common 1-eigenspace
+// the group label should be input as a string, eg HasRationalTorsion("5.624.1")
 HasRationalTorsion := function(group_label)
     return L[group_label]`orbits[1][2] eq 1;
 end function;
@@ -165,8 +190,7 @@ function MakeLineReps(n, ell)
     return new_stuff cat old_stuff;
 end function;
 
-
-// Function checks if a subgroup has a common 1-subspace which is always a 1- or (-1)-eigenspace    
+// Function checks if a subgroup has a (1, (-1))-group eigenspace    
 HasQuadraticTorsion := function(group_label, ell)
     if not(2 in {orbit[2] : orbit in L[group_label]`orbits}) then
         return false;
@@ -192,8 +216,19 @@ HasQuadraticTorsion := function(group_label, ell)
     return true;
 end function;
 
+// Given vectors {v1,...,vn} and scalars {c1,...,cn} returns the linear combination of those vectors scaled by
+// the constant 1/ell. Explicitly, it returns:
+// (1/ell)*(c1*v1 + c2*v2 + ... cn*vn)
+function LinearCombo(vecs, scalars, ell)
+    acc := scalars[1] * vecs[1];
+    for j in [2..#vecs] do
+        acc := acc + scalars[j] * vecs[j];
+    end for;
+    return acc/ell;
+end function;
 
-// Initializes possibilities for which quadratic extensions of Q(sqrt(d))/Q might have additional 5-torsion.
+// The quadrartic fields which are not precluded from containing l-torsion
+// by Theorem 1.5 of Melistas's paper
 // This is Step 1 in Algorithm 4
 PlausibleDees := function(conductor)
     prime_factors := {tuple[1] : tuple in Factorization(conductor)};
@@ -218,79 +253,284 @@ DiscFromDee := function(d)
     end if;
 end function;
 
-// Checks if a curve C could have additional 5-torsion over a quadratic extension Q(sqrt(d))/Q.
-// Returns true if no quadratic torsion guaranteed.
-// Returns false if we might have additional 5-torsion over a quadratic extension.
-// In this case, we also return the set {d : Q(sqrt(d)) might have 5-torsion}
+
 // This is Algorithm 4 in our paper
-ImpossibleQuadraticTorsion := function(C, frob_polys_list)
-candidates := PlausibleDees(Conductor(C));
-for frob_poly in frob_polys_list do
-    if Coefficients(frob_poly)[1] lt 49 then
-        continue;
-    end if;
-    p := Integers()!Sqrt(Coefficients(frob_poly)[1]);
-    if Evaluate(frob_poly, 1) ne 0 then // no 5-torsion over Fp
-        candidates := {d : d in candidates | KroneckerSymbol(DiscFromDee(d), p) ne 1};
-    end if;
+// This function takes in a curve C and a list of frobenius polynomials frobs (obtained from
+// the prior function "runsmalljac") and determines if the curve C could have additional 5-torsion over
+// a quadratic extension. If this is impossible, the function returns true. If there could be 5-torsion
+// over some quadratic extension, the function returns false and a list of candidates
+// {d : Q(sqrt(d)) might have additional 5-torsion}
+ImpossibleQuadraticTorsion := function(C, frobs)
+    candidates := PlausibleDees(Conductor(C));
     
-    if #candidates eq 0 then
-        return true, candidates;
-    end if;
-end for;
-
-return false, candidates;
-end function;
-
-
-// This checks if a complex number (represented as a pair of floating point reals) could be represented as a rational number
-// of bounded height H with error at most epsilon. This is Algorithm 5 in the paper.
-   
-
-
-function LinearCombo(vecs, scalars, ell)
-// vecs is a basis for the lattice of the analytic Jacobian, and scalars is an element in the vector-space
-// formulation of the torsion points. This function returns the torsion point corresponding to scalars
-// in the analytic jacobian
-    acc := scalars[1] * vecs[1];
-    for j in [2..#vecs] do
-        acc := acc + scalars[j] * vecs[j];
-    end for;
-    return acc/ell;
-end function;
-
-
-MumfordFromCoords := function(points, f)
-// Given points [(x1,y1),(x2,y2)] on a dimension 2 jacobian we recover the mumford coordinates
-// These are presented in the form (x^2+alpha*x+beta, gamma*x+delta)
-// Requires reduced divisors of degree 1 or 2. Do not feed in the identity or unreduced divisors.
-    if #points eq 2 then // degree 2 divisor
-        x1 := points[1][1];
-        y1 := points[1][2];
-        x2 := points[2][1];
-        y2 := points[2][2];
-
-        alpha := -(x1 + x2);
-        beta := x1*x2;
-
-        // special case when the divisor is of the form (2P - 2∞)
-        if Abs(x1 - x2) lt 10^(-10) then // threshold for floating point error
-            fprime := Derivative(f);
-            gamma := Evaluate(fprime, x1) / (2*y1);
-            delta := y1 - gamma * x1;
-        else // the generic case
-            gamma := (y2-y1)/(x2-x1);
-            delta := (y1*x2-y2*x1)/(x2-x1);
+    for i->elt in frobs do
+        // first check the characteristic polynomial
+        frobpoly := Split(elt, ",");
+        if #frobpoly eq 2 then
+            assert frobpoly[2] eq "?"; //missing data, bad prime
+            continue;
         end if;
+        p := eval frobpoly[1];
+        if p lt 7 then
+            continue;
+        end if;
+        ap := eval frobpoly[2];
+        bp := eval frobpoly[3];
+        
+        S := PolynomialRing(IntegerRing(5));
+        frob_poly := S![p^2, p*ap, bp, ap, 1];
+        
+        if Evaluate(frob_poly, 1) ne 0 then // no 5-torsion over Fp
+            candidates := {d : d in candidates | KroneckerSymbol(DiscFromDee(d), p) ne 1};
+        end if;
+        
+        if #candidates eq 0 then
+            return true, candidates;
+        end if;
+    end for;
+    
+    return false, candidates;
+end function;
 
-        return <alpha, beta, gamma, delta>;
-    elif #points eq 1 then // degree 1 divisor, (u, v) = (x-x1, y1)
-        return points[1];  
+// HELPER FOR ALGORITHM 5
+// Best rational approximation for r with denominator bounded by H
+// Using result of stack exchange user Stingy: https://math.stackexchange.com/questions/856861/semi-convergent-of-continued-fractions
+// Alternatively, this is on page 22 of Khinchin's Continued Fractions
+function BestApproximation(r, H)
+    // Generate continued fraction expansion
+    CFE := ContinuedFraction(r);
+    
+    // Compute truncations alpha and beta which are last acceptable and first unacceptable
+    den := 1;
+    num_terms := 1; // will become number of terms in *beta*
+    while (den lt H) and (num_terms lt #CFE) do
+        num_terms := num_terms+1;
+        den := Denominator(ContinuedFractionValue(CFE[1..num_terms]));  
+    end while;
+    
+    // Compute whether smallest semiconvergent from beta is acceptable
+    // If not, return alpha
+    
+    smallest_semi := ContinuedFractionValue(Append(CFE[1..(num_terms-1)], Ceiling(CFE[num_terms]/2)));
+    alpha := ContinuedFractionValue(CFE[1..(num_terms - 1)]);
+    if Denominator(smallest_semi) gt H then
+        return alpha;
+    elif Denominator(smallest_semi) eq H then
+        if Abs(smallest_semi - r) lt Abs(alpha - r) then
+            return smallest_semi;
+        else
+            return alpha;
+        end if;
+   end if;
+    
+    // Otherwise, perform binary search
+    // Specifically, let L and R denote lower and upper bounds on last denominator
+    L := Ceiling(CFE[num_terms]/2);
+    R := CFE[num_terms];
+    while L lt R do
+        M := Ceiling((L+R)/2);
+        // If M acceptable, L=M. Otherwise, R=M-1
+        if Denominator(ContinuedFractionValue(Append(CFE[1..(num_terms-1)], M))) le H then
+            L := M;
+        else
+            R := M-1;
+        end if;
+    end while;
+    
+    return ContinuedFractionValue(Append(CFE[1..(num_terms-1)], L)); // equivalently, R
+end function;
+
+// ALGORITHM 5
+// Takes a complex number z and a height bound H. Computes whether z 
+// has a rational approx q with height bounded by H and error, measured
+// as max(|Im(z)|, |Re(z) - q|), bounded by 1/(2H^2).
+function NearlyRational(z, H)
+    epsilon := 1/(2*H^2);
+    
+    if Abs(Im(z)) gt epsilon then
+        return [];
+    end if;
+    r := Re(z);
+    
+    q := BestApproximation(r, H);
+    
+    if Abs(q - r) le epsilon and Abs(Numerator(q)) le H then
+        return [q];
     end if;
     
-    fprintf std_err, "MumfordFromCoords recieved %o points\n", #points; // I think we should remove this since I don't think std_err will work in general -Andy
-    return <>;
+    return [];
 end function;
+
+// Input: a sequence or set of 2-tuples (item, count) encoding a multiset
+// Output: A sequence obtained by unwrapping the multiset into its individual elements
+MultisetToSequence := function(multiset)
+    items := [];
+    for multiitem in multiset do
+        items := items cat [multiitem[1] : x in [1..multiitem[2]]];
+    end for;
+    return items;
+end function;
+
+// Given a degree 6 polynomial, returns all factorizations of it into cubics
+CubicPairs6 := function(f)
+    C<i> := ComplexField(20);
+    P<x> := PolynomialRing(C);
+    f := P!f;
+    roots_w_mult := Roots(f);
+    roots := MultisetToSequence(roots_w_mult);
+    
+    pairs := [];
+    for j in [2..5] do
+        for k in [j+1..6] do
+            sigma_f := (x-roots[1])*(x-roots[j])*(x-roots[k]);
+            tau_f, r := Quotrem(f, sigma_f);
+            Append(~pairs, <sigma_f, tau_f>);
+        end for;
+    end for;
+    return pairs;
+end function;
+
+// Given a degree 5 polynomial, returns all factorizations of it into a cubic and a quadratic
+CubicPairs5 := function(f)
+    C<i> := ComplexField(20);
+    P<x> := PolynomialRing(C);
+    f := P!f;
+    roots_w_mult := Roots(f);
+    roots := MultisetToSequence(roots_w_mult);
+    
+    pairs := [];
+    for i in [1..3] do
+        for j in [i+1..4] do
+            for k in [j+1..5] do
+                sigma_f := (x-roots[i])*(x-roots[j])*(x-roots[k]);
+                tau_f, r := Quotrem(f, sigma_f);
+                Append(~pairs, <sigma_f, tau_f>);
+            end for;
+        end for;
+    end for;
+    return pairs;
+end function;
+
+// This calculates the quantity R which is used in formulas 10.3 and 10.4 of Stoll's paper
+// It miraculously works for both degree 5 and degree 6 polynomials without separate casework
+function PairDiscriminant(pair)
+    // We are going to factor out leading terms to make the two polynomials monic
+    // Starting acc as below counterbalances that normalization appropriately
+    acc := (LeadingCoefficient(pair[2])*LeadingCoefficient(pair[1]))^3;
+    
+    for ai in MultisetToSequence(Roots(pair[1])) do
+        for aj in MultisetToSequence(Roots(pair[2])) do
+            // beta_i=0 terms are skipped in the degree 5 case, but 
+            // *because we normalized to monic*, they would only induce 
+            // multiplication by 1, so that is fine. 
+            acc := acc * (ai-aj); 
+        end for;
+    end for;
+    return acc;
+end function;
+
+
+// Computes the a_(i, {S, S'})'s in equation 7.1 of Stoll's paper, 
+// for a fixed factorization into cubics
+Ai := function(pair)
+    // recall that the index on sigma indicates the power of Z, not the power of X
+    sigma3 := Coefficient(pair[1], 0);
+    sigma2 := Coefficient(pair[1], 1);
+    sigma1 := Coefficient(pair[1], 2);
+    sigma0 := Coefficient(pair[1], 3);
+    tau3 := Coefficient(pair[2], 0);
+    tau2 := Coefficient(pair[2], 1);
+    tau1 := Coefficient(pair[2], 2);
+    tau0 := Coefficient(pair[2], 3);
+    R := PairDiscriminant(pair);
+    
+    a1 := -1/(4*PairDiscriminant(pair)) * (sigma1*tau0 - sigma0*tau1);
+    a2 := -1/(4*PairDiscriminant(pair)) * (sigma3*tau0 - sigma0*tau3 + sigma2*tau1 - sigma1*tau2);
+    a3 := -1/(4*PairDiscriminant(pair)) * (sigma3*tau2 - sigma2*tau3);
+    a4 := -1/(4*PairDiscriminant(pair)) * (sigma1*sigma3^2*tau0^2*tau2 - sigma0^2*sigma2*tau1*tau3^2 + sigma1*sigma2*tau1*tau2*(sigma3*tau0 - sigma0*tau3)- sigma3*tau3*(sigma1*sigma2*tau0^2 - sigma0^2*tau1*tau2) - sigma1*tau1*(sigma2^2*tau0*tau3 - sigma0*sigma3*tau2^2)- sigma1^2*sigma3*tau0*tau2^2 + sigma0*sigma2^2*tau1^2*tau3 + 4*sigma1*sigma3*tau1*tau3*(sigma1*tau0 - sigma0*tau1)+ sigma2*tau2*(sigma1^2*tau0*tau3 - sigma0*sigma3*tau1^2) - sigma0*tau0*(sigma3^2*tau1*tau2 + tau3^2*sigma1*sigma2)+ sigma0*tau0*(4*sigma3*tau3*(sigma3*tau0 - sigma0*tau3) + 4*sigma2*tau2*(sigma3*tau2 - sigma2*tau3)- 3*sigma3*tau3*(sigma2*tau1 - sigma1*tau2)));
+    
+    return [a1, a2, a3, a4];
+end function;
+
+// Computes the b_({S, S'}, j)'s in formula 7.1
+Bj := function(pair)
+    // recall that the index on sigma indicates the power of Z, not the power of X
+    sigma3 := Coefficient(pair[1], 0);
+    sigma2 := Coefficient(pair[1], 1);
+    sigma1 := Coefficient(pair[1], 2);
+    sigma0 := Coefficient(pair[1], 3);
+    tau3 := Coefficient(pair[2], 0);
+    tau2 := Coefficient(pair[2], 1);
+    tau1 := Coefficient(pair[2], 2);
+    tau0 := Coefficient(pair[2], 3);
+    
+    b0 := -((sigma3*tau0 + sigma0*tau3)^2 + 2*(sigma1*sigma2*tau0*tau3 + sigma0*sigma3*tau1*tau2)+ 3*(sigma1*sigma3*tau0*tau2 + sigma0*sigma2*tau1*tau3) + 5*(sigma2*sigma3*tau0*tau1 + sigma0*sigma1*tau2*tau3));
+    b1 := sigma3*tau1 + sigma1*tau3;
+    b2 := -(sigma3*tau0 + sigma0*tau3);
+    b3 := sigma2*tau0 + sigma0*tau2;
+    b4 := 1;
+    
+    return [b0, b1, b2, b3, b4];
+end function;
+
+// In Sto99, the bound on the contribution from an archimedean place
+// is Log of a formula in terms of Ai's and bj's. This function calculates
+// that formula.
+BoundFromAisBjs := function(ais, bjs)
+    ibounds := [];
+    for i in [1..4] do
+        ibound := 0;
+        for ssprime in [1..#ais] do
+            bterm := 0;
+            for j in [0..4] do
+                bterm := bterm + Abs(bjs[ssprime][j+1]); // j+1 because magma sequences are 1-indexed
+            end for;
+            bterm := Sqrt(bterm);
+            ibound := ibound + Abs(ais[ssprime][i])*bterm;
+        end for;
+        ibound := ibound^2;
+        Append(~ibounds, ibound);
+    end for;
+    return Max(ibounds);
+end function;
+
+// Given a degree 5 or 6 polynomial with integer coefs, computes 
+// the contibution of the infinite places of Q(sqrt(d)) to the 
+// bound on the naive height of torsion on the jacobian of the 
+// associated curve
+InfiniteContribution := function(f)
+    C<i> := ComplexField(20);
+    P<x> := PolynomialRing(C);
+    f := P!f;
+
+    if Degree(f) eq 5 then
+        pairs := CubicPairs5(f);
+    else
+        pairs := CubicPairs6(f);
+    end if;
+
+    AllAs := [];
+    AllBs := [];
+    for pair in pairs do
+        Append(~AllAs, Ai(pair));
+        Append(~AllBs, Bj(pair));
+    end for;
+    return Log(BoundFromAisBjs(AllAs, AllBs));
+end function;
+
+// A bound on the naive height of quadratic torsion for the jacobian
+// of the curve defined by the polynomial f.
+function HeightBound(f)
+    return 8/3*Log(2)-4*Log(Content(f)) + 2/3*Log(Discriminant(f)) + 2/3*InfiniteContribution(f);
+end function;
+
+
+// Given a the first mumford coordinate (x^2 + alpha*x+beta), recover the 
+// possible second coordinates which satisfy a curve C: Y^2 = f(X)
+function HeightBound(f)
+    return 8/3*Log(2)-4*Log(Content(f)) + 2/3*Log(Abs(Discriminant(f))) + 2/3*InfiniteContribution(f);
+end function;
+
 
 // Given a the first mumford coordinate (x^2 + alpha*x+beta), recover the possible second coordinates which satisfy
 // a curve C: Y^2 = f(X)
@@ -300,271 +540,111 @@ function ComputeGammaDelta(alpha, beta, C)
 
     // we will compute the x-coords in the quadratic extension in which they live.
     disc := alpha^2 -4*beta;
-    K1 := QuadraticField(disc);
-    sqrt_disc := K1.1;
+    
+    R<w> := PolynomialRing(Rationals());
+    t := w^2 - disc;
+    if IsIrreducible(t) then
+        K1 := ext<QNF() | t>;
+    else
+        K1 := QNF();
+    end if;
+    R<w> := PolynomialRing(K1);
+    t := w^2 - disc;
+    sqrt_disc := Evaluate(Factorization(t)[1][1], 0);
     x1 := (-alpha + sqrt_disc)/2;
     x2 := (-alpha - sqrt_disc)/2;
 
     // Now we want to compute the y-coords. They are sqrt(f(x)), so first we compute f(x)
     S<x,y,z> := PolynomialRing(K1,3);
     def_poly := S!DefiningPolynomial(C);
-    fx1 := Evaluate(def_poly, [x1, 0, 1]);
-    fx2 := Evaluate(def_poly, [x2, 0,1]);
+    fx1 := Evaluate(-def_poly, [x1, 0, 1]);
+    fx2 := Evaluate(-def_poly, [x2, 0,1]);
 
     // We need additional quadratic extensions to get sqrt(f(x)):
-    L1 := QuadraticField(K1, fx1);
-    sqrt_fx1 := L1.1;
-    L2 := QuadraticField(K1, fx2);
-    sqrt_fx2 := L2.1;
-    y1 := sqrt
+    P<a> := PolynomialRing(K1);
+    g1 := a^2 - fx1;
     
-    
-    
-
-// Algorithm 6
-function SimpleQuadTorsFinder(C, frob_poly_list)
-    existence, possibilities := ImpossibleQuadraticTorsion(C, frob_poly_list);
-    // recall existence is a boolean which is true if simple quadratic torsion is impossible
-    if existence then
-        return false;
-    end if;
-
-    height_bounds := {};
-    for dee in possibilities do:
-        Include(~heigh_bounds, height(dee)); // fix this line once we have functioning height code
-    end for;
-    h := Max(height_bounds);
-
-    CF<i> := ComplexField(PRECISION); // sort out precision stuff -Andy
-    Cx<x> := PolynomialRing(CF);
-    f := -Evaluate(DefiningPolynomial(C), [x, 0, 1]);
-    A := AnalyticJacobian(f);
-    M := BigPeriodMatrix(A);
-    v1 := Matrix(CF, 2, 1, [M[1][1],M[2][1]]);
-    v2 := Matrix(CF, 2, 1, [M[1][2],M[2][2]]);
-    v3 := Matrix(CF, 2, 1, [M[1][3],M[2][3]]);
-    v4 := Matrix(CF, 2, 1, [M[1][4],M[2][4]]);
-
-    line_reps := MakeLineReps(4,5);
-    all_torsion := [LinearCombo([v1, v2, v3, v4], line_reps[j], ell) : j in [1..156]];
-    algebraic_torsion_points := [**];
-    for pt in all_torsion do
-        try 
-            Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
-        catch e 
-            Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
-        // we need degree 2 divisors for Magma to be happy with list comprehension so if this is not the case
-        // we double the point to get a degree two divisor
-        end try;
-    end for;
-
-    good_torsion := [];
-
-    for point in algebraic_torsion_points do:
-        alpha := point[1][1];
-        beta := point[1][2];
-        approx_alpha := algo5(alpha); // fix with real algo name
-        approx_beta := algo5(beta); // fix with real algo name
-
-        if (#approx_alpha eq 0) or (#approx_beta eq 0) then // check that we have rational approximations
-            continue;
-        end if;
-        // if we do, replace alpha and beta with their approximations
-        alpha := approx_alpha[1];
-        beta := approx_beta[1];
-
-        // build a helper function
-        
-
-
-        
-
-
-// Given a genus 2 curve and an ell, computes the ell-torsion of the Jacobian over C and
-// returns one point in each line (line = copy of Z/ellZ = 1D subspace)
-function CTorsion(C, ell)
-    CF<i> := ComplexField(PRECISION); // sort out precision stuff -Andy
-
-    Cx<x> := PolynomialRing(CF);
-    f := -Evaluate(DefiningPolynomial(C), [x, 0, 1]);
-    A := AnalyticJacobian(f);
-    M := BigPeriodMatrix(A);
-
-    v1 := Matrix(CF, 2, 1, [M[1][1],M[2][1]]);
-    v2 := Matrix(CF, 2, 1, [M[1][2],M[2][2]]);
-    v3 := Matrix(CF, 2, 1, [M[1][3],M[2][3]]);
-    v4 := Matrix(CF, 2, 1, [M[1][4],M[2][4]]);
-
-    line_reps := MakeLineReps(4,5);
-    
-    analytic_torsion_points := [LinearCombo([v1, v2, v3, v4], line_reps[j], ell) : j in [1..156]];
-    algebraic_torsion_points := [**];
-    for pt in analytic_torsion_points do
-        try 
-            Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
-        catch e 
-            Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
-            fprintf std_err, "Doubling trick saved %o!\n", C;
-        // we need degree 2 divisors for Magma to be happy with list comprehension so if this is not the case
-        // we double the point to get a degree two divisor
-        end try;
-    end for;
-    
-    return [*MumfordFromCoords(pt, f) : pt in algebraic_torsion_points*];
-end function;
-
-
-// CFE stands for continued fraction expansion. We can write any real number as a + (1/(b+1/(c+...)))
-
-
-// we need a helper function which eats a full CFE (as a sequence) and a length n and returns the
-// corresponding rational number which we get by expanding the first n coefficients in the CFE
-function ExpandCFE(CFE, n)
-    if n eq 1 then
-        return CFE[1];
+    if IsIrreducible(g1) then
+        L1<y1> := ext<K1 | g1>;
     else
-        return CFE[1] + 1/(ExpandCFE(CFE[2..n],n-1));
+        L1 := K1;
+        y1 := Evaluate(Factorization(g1)[1][1], 0);
     end if;
-end function;
-
-// The input val is a real number which we computed to be a mumford coefficient
-// The input h is a height = max(numerator, denominator) bound on what is permissible for a 5-torsion point
-// The input err is a bound on the possible error of the FromAnalyticJacobian computation
-// The output is the computed CFE for val as well as the list of possible lengths. This may be empty!
-function RoundVal(val, h, err)
-    CFE = ContinuedFraction(val);
-    allowed_err_lengths := [];
-    allowed_height_lengths := [];
-    for n in [1..#CFE] do
-        approx := ExpandCFE(CFE,n);
-        err_bool := Abs(approx - val) le err;
-        height_bool := Max(Abs(Numerator(approx)), Abs(Denominator(approx)));
-
-        if err_bool then
-            Append(~allowed_err_lengths, n);
-        end if;
-        if height_bool then
-            Append(~allowed_height_lengths, n);
-        end if;
-
-    // We want to check if there are any allowable rational approximations. There are no allowable rational approximations when
-    // min(allowed_err) - max(allowed_heights) > 1
-    if (min(allowed_err_lengths) - max(allowed_height_lengths)) gt 1 then
-        return CFE, [];
-    elif (min(allowed_err_lengths) - max(allowed_height_lengths)) eq 1 then
-        return CFE, [max(allowed_height_lengths), min(allowed_err_lengths)]
+    Q<b> := PolynomialRing(L1);
+    g2 := b^2 - fx2;
+    // if needed, take another extension to get sqrt(fx2)
+    if IsIrreducible(g2) then
+        L2<y2> := ext<L1 | g2>;
     else
-        return CFE, [i : i in [min(allowed_err_lengths)..max(allowed_height_lengths)]]
-end function;
-
-
-// left off here -Andy
-
-
-// Precondition: CFE (continued fraction expansion) has an element greater than THRESHOLD
-// Note: CFE stands for continued fraction expansion. We can write any real number as a + (1/(b+1/(c+...)))
-// The input is a sequence of coefficients corresponding the the values in the CFE for a real number
-// The other input, height, is a height bound
-
-function RoundCFE(CFE)
-    if #CFE eq 2 then
-        return CFE[1];
-    if CFE[2] gt THRESHOLD then
-        return CFE[1];
-    else
-        return CFE[1] + 1 / RoundCFE(CFE[[2..#CFE]]);
+        L2 := L1;
+        y2 := Evaluate(Factorization(g2)[1][1], 0);
     end if;
-end function;
 
-// Given a good point, returns abgd rational such that u = x^2+ax+b and v = sqrt(dee)*(gx+d)
-// For degree 1 divisor, returns ab rational such that u = x - a and v = sqrt(dee)*b
-function RoundPoint(pt, dee)
-    if #pt eq 4 then
-        a := Re(pt[1]);
-        b := Re(pt[2]);
-        if dee lt 0 then
-            g := Im(pt[3]) / Sqrt(Abs(dee));
-            d := Im(pt[4]) / Sqrt(Abs(dee));
-        else
-            g := Re(pt[3]) / Sqrt(Abs(dee));
-            d := Re(pt[4]) / Sqrt(Abs(dee));
-        end if;
-        a := RoundCFE(ContinuedFraction(a*FUDGE));
-        b := RoundCFE(ContinuedFraction(b*FUDGE));
-        g := RoundCFE(ContinuedFraction(g*FUDGE));
-        d := RoundCFE(ContinuedFraction(d*FUDGE));
-        return <a,b,g,d>;
-    elif #pt eq 2 then
-        a := Re(pt[1]);
-        if dee lt 0 then
-            b := Im(pt[2]) / Sqrt(Abs(dee));
-        else
-            b := Re(pt[2]) / Sqrt(Abs(dee));
-        end if;
-        a := RoundCFE(ContinuedFraction(a*FUDGE));
-        b := RoundCFE(ContinuedFraction(b*FUDGE));
-        return <a, b>;
+    // deal with the case where the discriminant is zero and we have a repeated root:
+    if disc eq 0 then
+        f := HyperellipticPolynomials(C);
+        fprime := Derivative(f);
+        gamma := Evaluate(fprime, x1)/(2*y1);
+        delta := -gamma*x1+y1;
+        return [<gamma, delta>];
     end if;
-    fprintf std_err, "RoundPoint recieved mumford coord tuple with %o values\n", #pt;
-    return <>;
-end function;
-
-// Checks whether the continued fraction expansion of a real number r has term greater than THRESHOLD
-function NearlyRational(r)
-    if Abs(r) lt ZEROISH then 
-        return true;
-    end if;
-    
-    // the idea is that if r is EXACTLY an integer/neat fraction,
-    // this will add a big term to its CFE
-    r := r * FUDGE;
-    
-    for n in ContinuedFraction(r) do
-        if n gt THRESHOLD then
-            return true;
-        end if;
-    end for;
-    return false;
-end function;
-
-// takes in <alpha, beta, gamma, delta> and d and tells whether <alpha, beta, gamma, delta> 
-// could plausibly be the mumford coordinates of a torsion point over Q(sqrt(d))
-function PlausiblePoint(pt, dee)
-    if #pt eq 4 then // degree 2 divisor
-        if (dee lt 0) and Abs(Im(pt[1]))+Abs(Im(pt[2]))+Abs(Re(pt[3]))+Abs(Re(pt[4])) lt ZEROISH then
-            a := Re(pt[1]);
-            b := Re(pt[2]);
-            g := Im(pt[3]) / Sqrt(Abs(dee));
-            d := Im(pt[4]) / Sqrt(Abs(dee));
-            return NearlyRational(a) and NearlyRational(b) and NearlyRational(g) and NearlyRational(d);
-
-        elif (dee gt 0) and Abs(Im(pt[1]))+Abs(Im(pt[2]))+Abs(Im(pt[3]))+Abs(Im(pt[4])) lt ZEROISH then
-            a := Re(pt[1]);
-            b := Re(pt[2]);
-            g := Re(pt[3]) / Sqrt(Abs(dee));
-            d := Re(pt[4]) / Sqrt(Abs(dee));
-            return NearlyRational(a) and NearlyRational(b) and NearlyRational(g) and NearlyRational(d);
-        end if;
-    
-        return false;
-    elif #pt eq 2 then // degree 1 divisor
-        if (dee lt 0) and Abs(Im(pt[1]))+Abs(Re(pt[2])) lt ZEROISH then
-            a := Re(pt[1]);
-            b := Im(pt[2]) / Sqrt(Abs(dee));
-            return NearlyRational(a) and NearlyRational(b);
-        elif (dee gt 0) and Abs(Im(pt[1]))+Abs(Im(pt[2])) lt ZEROISH then
-            a := Re(pt[1]);
-            b := Re(pt[2]) / Sqrt(Abs(dee));
-            return NearlyRational(a) and NearlyRational(b);
-        end if;
         
-        return false;
-    end if;
     
-    fprintf std_err, "PlausiblePoint recieved mumford coord tuple with %o values\n", #pt;
-    return false;
+    gamma1 := (y1-y2)/(x1-x2);
+    delta1 := -gamma1*x1 + y1;
+    gamma2 := (y1 + y2)/(x1-x2);
+    delta2 := -gamma2*x1 + y1;
+//    gamma3 := (-y1-y2)/(x1-x2); // this is just the inverse of (gamma2, delta2)
+//    delta3 := -gamma3*x1 - y1;
+//    gamma4 := (-y1 + y2)/(x1-x2); // this is just the inverse of (gamma1, delta1)
+//    delta4 := -gamma4*x1 - y1;
+// because we can recover the last two possibilities from the first two, we omit them.
+// they are written in comments for you, dear reader
+    
+    return [<gamma1, delta1>, <gamma2, delta2>];
 end function;
 
+function ComputeGammaDegreeOne(alpha, C)
+// ensure we have Y^2 = f(X)
+    C := SimplifiedModel(C);
+    P<x,y,z> := PolynomialRing(Rationals(),3);
+    def_poly := P!DefiningPolynomial(C);
+    fx := Evaluate(-def_poly, [alpha, 0, 1]);
+    S<t> := PolynomialRing(Rationals());
+    g := t^2 - fx;
+    if IsIrreducible(g) then
+        K := ext<QNF() | g>;
+        Q<a> := PolynomialRing(K);
+        g2 := Q!g;
+        gamma := Roots(g2)[1][1];
+        gamma_rat := Rationals()!(gamma/K.1);
+        gamma_quad := Rationals()!(K.1^2);
+    else
+        gamma := Roots(g)[1][1];
+        gamma_rat := gamma;
+        gamma_quad := 1;
+    end if;
+    return gamma, gamma_rat, gamma_quad;
+end function;
+
+// Helper function to find square-free components of integers:
+function SqFreeFinder(int)
+    if (int eq 0) then
+        return 0;
+    end if;
+
+    prime_factors := {tuple[1] : tuple in Factorization(int) | tuple[2] mod 2 eq 1};
+
+    positive_squarefree_part := 1;
+    for prime in prime_factors do
+        positive_squarefree_part := positive_squarefree_part * prime;
+    end for;
+
+    return Sign(int)*positive_squarefree_part;
+end function;
+
+
+    
 // Given pt = <a, b, g, d> with abgd rational, tells whether 
 // (u, v) = (x^2+ax+b, sqrt(dee)*(gx+d)) is a 5-torsion point on the curve C
 // OR takes pt = <a, b> with ab rational and tells whether
@@ -586,7 +666,6 @@ function Is5Torsion(pt, dee, C)
         try
             return 5 * (JK ! [xK^2 + a*xK + b, sqrtdee*(g*xK + d)]) eq Id(JK);
         catch e
-            fprintf std_err, "Is5Torsion decided no, given %o, %o, %o as input \n", pt, dee, C;
             return false;
         end try;
     elif #pt eq 2 then
@@ -597,29 +676,179 @@ function Is5Torsion(pt, dee, C)
         try
             return 5 * (JK ! [xK - a, sqrtdee*b]) eq Id(JK);
         catch e
-            fprintf std_err, "Is5Torsion decided no, given %o, %o, %o as input \n", pt, dee, C;
             return false;
         end try;
     end if;
-    
-    fprintf std_err, "Is5Torsion recieved mumford coord tuple with %o values\n", #pt;
     return false;
 end function;
 
-// Determines whether the curve C : y^2=f(x) has 5 torsion in Q(sqrt(dee))
-// true is always correct, and accompanied by a witness 5-torsion point
-// false may not be correct, although this is unlikely. False negatives can
-// be caused by extremely large 5-torsion (large in the height sense)
-function Has5Torsion(C, dee)
-    all_torsion := CTorsion(C, 5);
-    good_torsion := [*RoundPoint(pt, dee) : pt in all_torsion | PlausiblePoint(pt, dee)*];
+// Given some points on a hyperelliptic curve Y^2 = f(X), recovers the mumford coordinates of the points
+// The parameter epsilon is a floating point thing to check when two floats are in fact equal.
+MumfordFromCoords := function(points, f, epsilon)
+    if #points eq 2 then // degree 2 divisor
+        x1 := points[1][1];
+        y1 := points[1][2];
+        x2 := points[2][1];
+        y2 := points[2][2];
+
+        alpha := -(x1 + x2);
+        beta := x1*x2;
+
+        if Abs(x1 - x2) lt epsilon then
+            fprime := Derivative(f);
+            gamma := Evaluate(fprime, x1) / (2*y1);
+            delta := y1 - gamma * x1;
+        else
+            gamma := (y2-y1)/(x2-x1);
+            delta := (y1*x2-y2*x1)/(x2-x1);
+        end if;
+
+        return <alpha, beta, gamma, delta>;
+    elif #points eq 1 then // degree 1 divisor, (u, v) = (x-x1, y1)
+        return points[1];  
+    end if;
     
-    for pt in good_torsion do
-        if Is5Torsion(pt, dee, C) then
-            return true, pt;
+    fprintf std_err, "MumfordFromCoords recieved %o points\n", #points;
+    return <>;
+end function;
+
+// A hueristic choice for how much precision to use
+function Precision(h)
+    return Minimum(MIN_PRECISION, Ceiling(10*h/Log(10)));
+end function;
+
+// Algorithm 6
+// Note: we can't actually return maybe as a possibility. As such, we'll write the outputs as strings rather than booleans
+function SimpleQuadTorsFinder(C, frob_poly_list)
+    existence, possibilities := ImpossibleQuadraticTorsion(C, frob_poly_list);
+    // recall existence is a boolean which is true if simple quadratic torsion is impossible
+    if existence then
+        return "false";
+    end if;
+    C := SimplifiedModel(C);
+    f := HyperellipticPolynomials(C);
+    h := HeightBound(f);
+    num_digits := Precision(h);
+    CF<i> := ComplexField(num_digits);
+    Cx := PolynomialRing(CF);
+
+    A := AnalyticJacobian(Cx!f);
+    M := BigPeriodMatrix(A);
+    v1 := Matrix(CF, 2, 1, [M[1][1],M[2][1]]);
+    v2 := Matrix(CF, 2, 1, [M[1][2],M[2][2]]);
+    v3 := Matrix(CF, 2, 1, [M[1][3],M[2][3]]);
+    v4 := Matrix(CF, 2, 1, [M[1][4],M[2][4]]);
+
+    line_reps := MakeLineReps(4,5);
+    all_torsion := [LinearCombo([v1, v2, v3, v4], line_reps[j], 5) : j in [1..156]];
+    algebraic_torsion_points := [**];
+    for pt in all_torsion do
+        try 
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
+        catch e 
+            // This sometimes resovles errors related to numerical stability
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
+        end try;
+    end for;
+
+    good_torsion := [];
+
+    for point in algebraic_torsion_points do
+        // degree 1 case:
+        if #point eq 1 then
+            alpha := MumfordFromCoords(point, f, 1/(2*Exp(2*h)))[1];
+            approx_alpha := NearlyRational(alpha, Exp(h));
+            if (#approx_alpha eq 0) then // check that we have rational approximations
+                continue;
+            end if;
+            // if we do, replace alpha and beta with their approximations
+            alpha := approx_alpha[1];
+            gamma, rational_part_gamma, quad_part_gamma := ComputeGammaDegreeOne(alpha, C);
+            if quad_part_gamma eq 1 then // this means we have a rational 5-torsion point
+                continue;
+            end if;
+            Append(~good_torsion,<alpha, rational_part_gamma,quad_part_gamma>);
+            continue;
+        end if;
+
+        //else we have the degree 2 case
+        mumford := MumfordFromCoords(point, f, 1/(2*Exp(2*h)));
+        alpha := mumford[1];
+        beta := mumford[2];
+        approx_alpha := NearlyRational(alpha, Exp(h));
+        approx_beta := NearlyRational(beta, Exp(h));
+        
+        if (#approx_alpha eq 0) or (#approx_beta eq 0) then // check that we have rational approximations
+            continue;
+        end if;
+        // if we do, replace alpha and beta with their approximations
+        alpha := approx_alpha[1];
+        beta := approx_beta[1];
+
+        upoints := ComputeGammaDelta(alpha, beta, C);
+        
+        for candidate in upoints do
+            minpoly_gamma := MinimalPolynomial(candidate[1]^2, Rationals()); // second argument ensures that the minpoly is over Q
+            minpoly_delta := MinimalPolynomial(candidate[2]^2, Rationals());
+            // if gamma and delta are of the form a*sqrt(d), then squaring (as we did above) gives a rational and its minpoly will be degree 1
+            // this is why we have the check below
+
+            if (Degree(minpoly_gamma) gt 1) or (Degree(minpoly_delta) gt 1) then
+                continue;
+            end if;
+            // stuff below needs commenting (oops!)
+            sq_gamma_num := Numerator(Rationals()!(candidate[1]^2));
+            sq_gamma_denom := Denominator(Rationals()!(candidate[1]^2));
+            sq_delta_num := Numerator(Rationals()!(candidate[2]^2));
+            sq_delta_denom := Denominator(Rationals()!(candidate[2]^2));
+            quad_part_gamma := SqFreeFinder(sq_gamma_num * sq_gamma_denom); // these two lines let us write gamma = r*sqrt(d) and delta = r'*sqrt(d')
+            quad_part_delta := SqFreeFinder(sq_delta_num * sq_delta_denom); // for rational r and r' and integer d and d'
+
+            // we require that d = d' else we'll toss it out
+            // note we need to allow the case where one of gamma or delta is 0
+            if not(quad_part_gamma eq quad_part_delta) and not(quad_part_gamma*quad_part_delta eq 0) then 
+                continue;
+            // we also ignore if gamma and delta are rational, (corresponding to quadratic parts both being
+            elif ((quad_part_gamma eq 1) or (quad_part_gamma eq 0)) and ((quad_part_delta eq 1) or (quad_part_delta eq 0)) then
+                continue;
+            end if;
+
+            if quad_part_delta eq 0 then
+                quad_part := quad_part_gamma;
+            elif quad_part_gamma eq 0 then
+                quad_part := quad_part_delta;
+            else
+                quad_part := quad_part_gamma;
+            end if;
+
+            if quad_part in possibilities then
+                _, rational_part_gamma := IsSquare(Rationals()!(candidate[1]^2/quad_part));
+                sign_matcher := Rationals()!(candidate[1]*candidate[2]/quad_part);
+                if sign_matcher ge 0 then
+                    _, rational_part_delta := IsSquare(Rationals()!(candidate[2]^2/quad_part));
+                else
+                    _, rational_part_delta := IsSquare(Rationals()!(candidate[2]^2/quad_part));
+                    rational_part_delta := -rational_part_delta;
+                end if;
+                Append(~good_torsion, <alpha, beta, rational_part_gamma, rational_part_delta, quad_part>);
+            end if;
+        end for;
+    end for;
+
+    // Now we want to verify that the "good torsion" is in fact 5-torsion by explicitly computing
+    for point in good_torsion do
+        //print(point);
+        if #point eq 3 then // this is the degree 1 case
+            if Is5Torsion(<point[1], point[2]>, point[3], C) then
+                return "true";
+            end if;
+        end if;
+        // else we have the degree 2 case
+        if Is5Torsion(<point[1], point[2], point[3], point[4]>, point[5], C) then
+            return "true";
         end if;
     end for;
-    return false;
+return "maybe";
 end function;
 
 ////////////////////////////// IMAGING ///////////////////////////////////
@@ -699,71 +928,26 @@ ImageByFroblist := function(L, dict, C)
         best_subgroups := {sg : sg in best_subgroups | not(HasRationalTorsion(sg))};
 
         // filter isomorphic non-conjugage subgroups by presence or absence of simple-quadratic 5-torsion
-        num_with_quadratic := #{sg : sg in best_subgroups | HasQuadraticTorsion(sg)};
+        num_with_quadratic := #{sg : sg in best_subgroups | HasQuadraticTorsion(sg,5)};
         // check if computing quadratic five-torsion will yield useful information
         if num_with_quadratic gt 0 and num_with_quadratic lt #best_subgroups then 
             // compute the candidate ds for the quadratic extensions Q(\root{d})
-            _, possibilities := ImpossibleQuadraticTorsion(C, frobs);
-            if #possibilities eq 0 then
-                best_subgroups := {sg : sg in best_subgroups | not(HasQuadraticTorsion(sg))};
-            else
-                for dee in possibilities do
-                    try 
-                        // if we can find simple quadratic 5-torsion points over Q(\root{d}), we restrict best_subgroups
-                        // else, it might be a flase negative so we do not retrict best_subgroups
-                        if Has5Torsion(C, dee) then
-                            best_subgroups := {sg : sg in best_subgroups | HasQuadraticTorsion(sg)};
-                            break;
-                        //else
-                            //fprintf std_err, "torsion expected on curve %o over Q(sqrt(%o)), but none found\n", C, dee;
-                        end if;
-                    catch e 
-                        fprintf std_err, "FAJ or something errored on %o\n", C;
-                        fprintf std_err, "%o\n", e;
-                    end try; // FromAnalyticJacobian randomly errors sometimes
-                end for;
+            try
+                QuadTorsPresence := SimpleQuadTorsFinder(C, frobs);
+            catch e
+                fprintf std_err, "FAJ or something errored on %o\n", C;
+                fprintf std_err, "%o\n", e;
+                QuadTorsPresence := "maybe";
+            end try; // FromAnalyticJacobian errors sometimes, in this case increase the precision of the complex field
+            if (QuadTorsPresence eq "false") then
+                best_subgroups := {sg : sg in best_subgroups | not(HasQuadraticTorsion(sg,5))};
+            elif (QuadTorsPresence eq "true") then
+                best_subgroups := {sg : sg in best_subgroups | HasQuadraticTorsion(sg,5)};
             end if;
+                // note: QuadTorsPresence is a pseudo-Boolean which could be "maybe" in which case the set "best_subgroups" is
+                // not altered
         end if;
     end if;
 
     return best_subgroups;
 end function;
-
-////////////////////////////////////// RUNNING SCRIPT ///////////////////////////////////
-
-// import Drew's lattice code.
-Attach("/projects/41d9a393-6a13-4259-bc6e-fa8eb804117b/threetorsimage/GSp.m");
-print "Computing subgroup lattice...";
-L := GSpLattice(4, 5, 0);
-print "Done computing subgroup lattice.";
-
-// Compute the characteristic dictionary
-print "Comupting dictionary of frob polys...";
-dict := InvariantDictionary(L);
-print "Done computing dictionary of frob polys...";
-
-R<x> := PolynomialRing(Rationals());
-
-file := Open(OUTPUT_FILENAME, MODE);
-std_err := Open(STD_ERR, MODE);
-
-// CHECK THIS LINE BEFORE RUNNING
-load "./Galois-representations-REU/LMFDB_typical_nonsurjective_data";
-
-image_to_curve := AssociativeArray();
-for curve_info in data do 
-    if #curve_info[#curve_info] eq 1 then
-        C := HyperellipticCurve(R!curve_info[#curve_info][1]);
-    else
-        C := HyperellipticCurve(R!curve_info[#curve_info][1], R!curve_info[#curve_info][2]);
-    end if;
-    
-    im := ImageByFroblist(L, dict, C);
-    
-    if im in Keys(image_to_curve) then
-        Append(~image_to_curve[im], curve_info[1]);
-    else 
-        image_to_curve[im] := [curve_info[1]];
-    end if;
-    fprintf file, "%o,%o\n", curve_info[1], im;
-end for;
