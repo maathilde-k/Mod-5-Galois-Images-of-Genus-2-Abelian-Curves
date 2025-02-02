@@ -9,6 +9,22 @@ To be consistent with the labeling in LMFDB, we use the same subgroup lattice. T
 
 The primary algorithm is contained in imager.m, while other computational results referenced in our paper have code to verify located in paper-lemmas.
 
+# Sample Code
+
+To run a particular curve, use the following block:
+```magma
+Attach("Imager.magma");
+// create the dictionary
+dict := InvariantDictionary(L);
+
+// LMFDB curve 431250.a.431250.1
+R<x> := PolynomialRing(Rationals());
+C := HyperellipticCurve(R![-1, 5, 1, -5, 0, 1], R![0, 1]);
+
+// Use the imaging function
+ImageByFroblist(L, dict, C);
+```  
+
 ## Acknowledgements
 
 We are grateful to Isabel Vogt and Sachi Hashimoto for their guidance and support throughout this project.
