@@ -1,7 +1,7 @@
 # Computing Mod-5 Galois Images of Torsion on Abelian Surfaces
 
 This repository contains code for computing the mod-5 image of the Galois Representation of torsion for the Jacobian of a genus 2 hyperelliptic curve.
-The algorithm is described in the paper "Computing Mod-5 Galois Images of Torsion on Abelian Surfaces" by Andy Zhu, Mathilde Kermorgant, and Aidan Hennessey.
+The algorithm is described in the paper "Computing mod-5 Galois images of torsion on abelian surfaces" by Andy Zhu, Mathilde Kermorgant, and Aidan Hennessey.
 All code provided is written in Magma.
 Note that the primary implementation relies on Andrew Sutherland's [Smalljac](https://math.mit.edu/~drew/smalljac.html) and this may require separate configuration.
 An alternative (but much slower) method is provided which does require Smalljac.
@@ -9,7 +9,7 @@ To be consistent with the labeling in LMFDB, we use the same subgroup lattice. T
 
 The primary algorithm is contained in imager.m, while other computational results referenced in our paper have code to verify located in paper-lemmas.
 
-## Sample Code
+## Running the code
 
 To run a particular curve, use the following block:
 ```magma
