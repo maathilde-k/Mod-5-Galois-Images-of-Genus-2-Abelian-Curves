@@ -1,0 +1,34 @@
+Attach("Imager.magma");
+dict := InvariantDictionary(L);
+
+// Code for running the typical curves with nonsurjective image of Galois
+// It will output the data in a txt file called "typical-results.txt" which can
+// easily be converted to a csv for processing
+Load("LMFDB_typical_nonsurjective_data.m");
+typical_output := Open("typical-results.txt", "w");
+for curve_info in typical_data do
+    if #curve_info[#curve_info] eq 1 then
+        C := HyperellipticCurve(R!curve_info[#curve_info][1]);
+    else
+        C := HyperellipticCurve(R!curve_info[#curve_info][1], R!curve_info[#curve_info][2]);
+    end if;
+    
+    im := ImageByFroblist(L, dict, C);
+    
+    fprintf typical_output, "%o,%o\n", curve_info[1], im;
+end for;
+
+// we can use the same code for the atypical curves
+Load("LMFDB_atypical_data.m");
+atypical_output := Open("atypical-results.txt", "w");
+for curve_info in typical_data do
+    if #curve_info[#curve_info] eq 1 then
+        C := HyperellipticCurve(R!curve_info[#curve_info][1]);
+    else
+        C := HyperellipticCurve(R!curve_info[#curve_info][1], R!curve_info[#curve_info][2]);
+    end if;
+    
+    im := ImageByFroblist(L, dict, C);
+    
+    fprintf atypical_output, "%o,%o\n", curve_info[1], im;
+end for;
