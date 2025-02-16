@@ -1,0 +1,103 @@
+// Setup
+Attach("Imager.magma")
+dict := InvariantDictionary(L);
+
+// loading the curve in
+R<x> := PolynomialRing(Rationals());
+C := HyperellipticCurve(R![-1, 5, 1, -5, 0, 1], R![0, 1]);
+C := SimplifiedModel(C);
+
+possibilities := chidambaram_allowed;
+// Get the local distribution
+frobs := RunSmalljac(C, 20000);
+Remove(~frobs, 1);
+invariant_counts := {**};
+
+S<x> := PolynomialRing(IntegerRing(5));
+for i->elt in frobs do
+    // first check the characteristic polynomial
+    frobpoly := Split(elt, ",");
+    if #frobpoly eq 2 then
+        assert frobpoly[2] eq "?"; //missing data, bad prime
+        continue;
+    end if;
+    p := eval frobpoly[1];
+    if p lt PRIMES_LOWER_LIMIT then
+        continue;
+    end if;
+    ap := eval frobpoly[2];
+    bp := eval frobpoly[3];
+    
+    frob_poly := S![p^2, p*ap, bp, ap, 1];
+
+    // Now we check the dimension of the 1-eigenspace
+    dim_one_eigenspace := OneSubspaceDim(p, C, 5, frob_poly);
+
+    invariants := <frob_poly, dim_one_eigenspace>;
+    possibilities := possibilities meet dict[invariants]
+    // Add invariant tuple to count
+    Include(~invariant_counts,invariants);
+end for;
+// display the empirical local distribution:
+invariant_counts;
+
+// Now we narrow the possibilities down in algorithm 3:
+for index in possibilities do
+        test_stat := SquareDifference(invariant_counts, InvariantSpectrum(L[index]`subgroup));
+        if Abs(test_stat - best_p) lt 0.001 then
+            Append(~best_subgroups, index);
+        elif test_stat lt best_p then
+            best_p := test_stat;
+            best_subgroups := [index];
+        end if;
+end for;
+// display the results:
+best_subgroups;
+
+// To get the local distributions of these we call:
+InvariantSpectrum(L["5.624.2"]`subgroup);
+InvariantSpectrum(L["5.624.4"]`subgroup);
+
+// we do some likelihood computations to back this up:
+// here's a helper function:
+// Returns the log likelyhood of the sampled distibution if expected is true underlying
+Likelihood := function(sampled, expected)
+    E := 1/#expected;
+    prob := 0;
+    is_possible := true;
+
+    for elt in Set(sampled) do
+        if Multiplicity(expected, elt) eq 0 then
+            is_possible := false;
+            continue;
+        end if;
+        prob := prob + Log(Multiplicity(expected, elt)*E)*Multiplicity(sampled, elt);
+    end for;
+    return is_possible, prob;
+end function;
+
+best_likelihood := 1;
+    best_subgroups := [];
+    log_likelihood_values := [];
+    for index in possibilities do
+        is_possible, cur_likelihood := Likelihood(invariant_counts, InvariantSpectrum(L[index]`subgroup));
+        Append(~log_likelihood_values, <index, cur_likelihood>);
+        if is_possible eq false then
+            continue;
+        end if;
+        if best_likelihood eq 1 then
+            best_likelihood := cur_likelihood;
+            best_subgroups := [index];
+        elif Abs(cur_likelihood - best_likelihood) lt 0.0001 then
+            Append(~best_subgroups, index);
+        elif cur_likelihood gt best_likelihood then
+            best_likelihood := cur_likelihood;
+            best_subgroups := [index];
+        end if;
+    end for;
+
+// to compare likelihood values, we look at:
+best_likelihood := Max(log_likelihood_values);
+second_likelihood := Max(log_likelihood_values diff {best_likelihood});
+best_likelihood;
+second_likelihood;
