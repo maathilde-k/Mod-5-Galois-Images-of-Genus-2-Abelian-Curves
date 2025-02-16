@@ -3062,4 +3062,4 @@ remaining_data := [
 ];
 
 
-data := RM_data cat CM_data cat Q2_data cat M2Q_data cat remaining_data;
+atypical_data := RM_data cat CM_data cat Q2_data cat M2Q_data cat remaining_data;
