@@ -29,6 +29,36 @@ MIN_PRECISION := 200;
 Attach("GSp.m");
 L := GSpLattice(4, 5, 0);
 
+// Per Chidambaram, any images should have an order 2 element with similitude character -1
+// corresponding to complex conjugation. This function takes a group label and checks if it
+// meets this criterion.
+function possible_image(label)
+    M := Matrix(IntegerRing(5), [[0, 0, 0, 1], 
+                [0, 0, 1, 0], 
+                [0, 4, 0, 0],
+                [4, 0, 0,0]]); // this is the explicit symplectic form
+    for elt in L[label]`subgroup do
+        elt_ord := Order(elt);
+        sim_character := (Transpose(elt)*M*elt)[1,4];
+        // per chidambaram we need to check for existence of an order two element with similitude character -1
+        if (elt_ord eq 2) and (sim_character eq 4) then
+            return true;
+        end if;
+    end for;
+    return false;
+end function;
+
+// compute the allowed subgroups:
+chidambaram_allowed := ["1.1.1"];
+for sbgrp in Keys(L) do
+    if sbgrp eq "1.1.1" then
+        continue;
+    end if;
+    if possible_image(sbgrp) then
+        Include(~chidambaram_allowed, sbgrp);
+    end if;
+end for;
+
 /////////////////////////////////////// LOCAL METHODS ///////////////////////////////////////////
 
 // A local method for determining images is one based on sampling Frob_p
@@ -863,7 +893,7 @@ ImageByFroblist := function(L, dict, C)
     // Removes the first line of the smalljac file which simply contains curve info
     Remove(~frobs, 1);
 
-    possibilities := Keys(L);
+    possibilities := chidambaram_allowed;
 
     ////////////////////////////// Compute local information //////////////////////////////
 
