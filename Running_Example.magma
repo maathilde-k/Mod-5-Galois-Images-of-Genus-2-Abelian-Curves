@@ -60,7 +60,7 @@ InvariantSpectrum(L["5.624.4"]`subgroup);
 
 // we do some likelihood computations to back this up:
 // here's a helper function:
-// Returns the log likelyhood of the sampled distibution if expected is true underlying
+// Returns the log likelihood of the sampled distibution if expected is true underlying
 Likelihood := function(sampled, expected)
     E := 1/#expected;
     prob := 0;
@@ -99,5 +99,158 @@ best_likelihood := 1;
 // to compare likelihood values, we look at:
 best_likelihood := Max(log_likelihood_values);
 second_likelihood := Max(log_likelihood_values diff {best_likelihood});
+// We compare the likelihood of the best fitting distribution(s) vs the second best fitting distribution(s)
+// note these are log-likelihoods, so exponentiate to get true likelihoods
 best_likelihood;
 second_likelihood;
+
+
+// Now we'll check if we have rational 5-torsion. We do this by checking the order of the Jacobian over Q
+// generically we would check if 5 divides the order, but in this case it's even easier since the order is 1
+#TorsionSubgroup(Jacobian(C));
+
+
+// Now we'll check for simple quadratic torsion. First let's see if we could have any and if so what extension
+ImpossibleQuadraticTorsion(C, frobs);
+// Since there is potentially simple quadratic torsion in Q(sqrt(5)) we check if there is any additional torsion
+// in this field. We'll run it through a modified version of algorithm 6 (SimpleQuadTorsFinder) to find the
+// instance of simple quadratic torsion
+function SimpleQuadTorsFinder(C, frob_poly_list)
+    existence, possibilities := ImpossibleQuadraticTorsion(C, frob_poly_list);
+    // recall existence is a boolean which is true if simple quadratic torsion is impossible
+    if existence then
+        return "false";
+    end if;
+    C := SimplifiedModel(C);
+    f := HyperellipticPolynomials(C);
+    h := HeightBound(f);
+    num_digits := Precision(h);
+    CF<i> := ComplexField(num_digits);
+    Cx := PolynomialRing(CF);
+
+    A := AnalyticJacobian(Cx!f);
+    M := BigPeriodMatrix(A);
+    v1 := Matrix(CF, 2, 1, [M[1][1],M[2][1]]);
+    v2 := Matrix(CF, 2, 1, [M[1][2],M[2][2]]);
+    v3 := Matrix(CF, 2, 1, [M[1][3],M[2][3]]);
+    v4 := Matrix(CF, 2, 1, [M[1][4],M[2][4]]);
+
+    line_reps := MakeLineReps(4,5);
+    all_torsion := [LinearCombo([v1, v2, v3, v4], line_reps[j], 5) : j in [1..156]];
+    algebraic_torsion_points := [**];
+    for pt in all_torsion do
+        try 
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(pt, A));
+        catch e 
+            // This sometimes resovles errors related to numerical stability
+            Append(~algebraic_torsion_points, FromAnalyticJacobian(2*pt, A));
+        end try;
+    end for;
+
+    good_torsion := [];
+
+    for point in algebraic_torsion_points do
+        // degree 1 case:
+        if #point eq 1 then
+            alpha := MumfordFromCoords(point, f, 1/(2*Exp(2*h)))[1];
+            approx_alpha := NearlyRational(alpha, Exp(h));
+            if (#approx_alpha eq 0) then // check that we have rational approximations
+                continue;
+            end if;
+            // if we do, replace alpha and beta with their approximations
+            alpha := approx_alpha[1];
+            gamma, rational_part_gamma, quad_part_gamma := ComputeGammaDegreeOne(alpha, C);
+            if quad_part_gamma eq 1 then // this means we have a rational 5-torsion point
+                continue;
+            end if;
+            Append(~good_torsion,<alpha, rational_part_gamma,quad_part_gamma>);
+            continue;
+        end if;
+
+        //else we have the degree 2 case
+        mumford := MumfordFromCoords(point, f, 1/(2*Exp(2*h)));
+        alpha := mumford[1];
+        beta := mumford[2];
+        approx_alpha := NearlyRational(alpha, Exp(h));
+        approx_beta := NearlyRational(beta, Exp(h));
+        
+        if (#approx_alpha eq 0) or (#approx_beta eq 0) then // check that we have rational approximations
+            continue;
+        end if;
+        // if we do, replace alpha and beta with their approximations
+        alpha := approx_alpha[1];
+        beta := approx_beta[1];
+
+        upoints := ComputeGammaDelta(alpha, beta, C);
+        
+        for candidate in upoints do
+            minpoly_gamma := MinimalPolynomial(candidate[1]^2, Rationals()); // second argument ensures that the minpoly is over Q
+            minpoly_delta := MinimalPolynomial(candidate[2]^2, Rationals());
+            // if gamma and delta are of the form a*sqrt(d), then squaring (as we did above) gives a rational and its minpoly will be degree 1
+            // this is why we have the check below
+
+            if (Degree(minpoly_gamma) gt 1) or (Degree(minpoly_delta) gt 1) then
+                continue;
+            end if;
+            // stuff below needs commenting (oops!)
+            sq_gamma_num := Numerator(Rationals()!(candidate[1]^2));
+            sq_gamma_denom := Denominator(Rationals()!(candidate[1]^2));
+            sq_delta_num := Numerator(Rationals()!(candidate[2]^2));
+            sq_delta_denom := Denominator(Rationals()!(candidate[2]^2));
+            quad_part_gamma := SqFreeFinder(sq_gamma_num * sq_gamma_denom); // these two lines let us write gamma = r*sqrt(d) and delta = r'*sqrt(d')
+            quad_part_delta := SqFreeFinder(sq_delta_num * sq_delta_denom); // for rational r and r' and integer d and d'
+
+            // we require that d = d' else we'll toss it out
+            // note we need to allow the case where one of gamma or delta is 0
+            if not(quad_part_gamma eq quad_part_delta) and not(quad_part_gamma*quad_part_delta eq 0) then 
+                continue;
+            // we also ignore if gamma and delta are rational, (corresponding to quadratic parts both being
+            elif ((quad_part_gamma eq 1) or (quad_part_gamma eq 0)) and ((quad_part_delta eq 1) or (quad_part_delta eq 0)) then
+                continue;
+            end if;
+
+            if quad_part_delta eq 0 then
+                quad_part := quad_part_gamma;
+            elif quad_part_gamma eq 0 then
+                quad_part := quad_part_delta;
+            else
+                quad_part := quad_part_gamma;
+            end if;
+
+            if quad_part in possibilities then
+                _, rational_part_gamma := IsSquare(Rationals()!(candidate[1]^2/quad_part));
+                sign_matcher := Rationals()!(candidate[1]*candidate[2]/quad_part);
+                if sign_matcher ge 0 then
+                    _, rational_part_delta := IsSquare(Rationals()!(candidate[2]^2/quad_part));
+                else
+                    _, rational_part_delta := IsSquare(Rationals()!(candidate[2]^2/quad_part));
+                    rational_part_delta := -rational_part_delta;
+                end if;
+                Append(~good_torsion, <alpha, beta, rational_part_gamma, rational_part_delta, quad_part>);
+            end if;
+        end for;
+    end for;
+
+    // Now we want to verify that the "good torsion" is in fact 5-torsion by explicitly computing
+    for point in good_torsion do
+        //print(point);
+        if #point eq 3 then // this is the degree 1 case
+            if Is5Torsion(<point[1], point[2]>, point[3], C) then
+                printf "The point is (x-%o, %o*sqrt(%o))", point[1], point[2], point[3];
+                return "true";
+            end if;
+        end if;
+        // else we have the degree 2 case
+        if Is5Torsion(<point[1], point[2], point[3], point[4]>, point[5], C) then
+            printf "The point is (x^2 + %o*x + %o, %o*sqrt(%o) x + (%o*sqrt(%o)))", point[1], point[2], point[3], point[5], point[4], point[5];
+            return "true";
+        end if;
+    end for;
+return "maybe";
+end function;
+
+SimpleQuadTorsFinder(C, frobs);
+// Since we observe an instance of simple quadratic torsion, we check if this narrows between the two possibilities:
+HasQuadraticTorsion("5.624.2", 5);
+HasQuadraticTorsion("5.624.4", 5);
+// Since only 5.624.2 is compatible with simple quadratic torsion, we conclude that it is the image.
