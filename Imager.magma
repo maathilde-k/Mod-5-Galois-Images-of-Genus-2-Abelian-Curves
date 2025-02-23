@@ -826,7 +826,7 @@ function SimpleQuadTorsFinder(C, frob_poly_list)
             if (Degree(minpoly_gamma) gt 1) or (Degree(minpoly_delta) gt 1) then
                 continue;
             end if;
-            // stuff below needs commenting (oops!)
+            // we'll extract the values of gamma and delta by squaring them and then finding the quadratic piece by taking the square-free component
             sq_gamma_num := Numerator(Rationals()!(candidate[1]^2));
             sq_gamma_denom := Denominator(Rationals()!(candidate[1]^2));
             sq_delta_num := Numerator(Rationals()!(candidate[2]^2));
