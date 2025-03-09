@@ -940,7 +940,7 @@ ImageByFroblist := function(L, dict, C)
     // if non-surjective, compare empirical and actual distributions of (characteristic polynimial, dim 1-eigenspace)
     for index in possibilities do
         test_stat := SquareDifference(invariant_counts, InvariantSpectrum(L[index]`subgroup));
-        if Abs(test_stat - best_p) lt 0.001 then
+        if test_stat eq best_p then
             Append(~best_subgroups, index);
         elif test_stat lt best_p then
             best_p := test_stat;
