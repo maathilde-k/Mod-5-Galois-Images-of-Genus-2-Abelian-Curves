@@ -1,0 +1,38 @@
+// import Drew's lattice code
+Attach("/projects/41d9a393-6a13-4259-bc6e-fa8eb804117b/threetorsimage/GSp.m");
+
+L := GSpLattice(4, 5, 0); // This computation takes about 2 minutes.
+
+Remove(~L, "1.1.1"); // exclude GSp4 itself
+
+// Given a finite matrix group, computes the characteristic polynomial and 
+// eigenspace dimensions of the elements (only for eigenvalues in ground field)
+CharDimSpectrum := function(MG) // MG is a finite matrix group
+    return {* <CharacteristicPolynomial(M), Dimension(Eigenspace(M, 1))>: M in MG *};
+end function;
+
+// This part takes about 20 seconds
+print "Calculating spectra";
+specs := AssociativeArray();
+for group_label in Keys(L) do
+    specs[group_label] := CharDimSpectrum(L[group_label]`subgroup);
+end for;
+print "Spectra calculated";
+
+// This part is fast
+print "Bucketing";
+max_bucket_size := 0;
+for group_1_label in Keys(L) do
+    this_bucket_size := 0;
+    for group_2_label in Keys(L) do
+        if specs[group_1_label] eq specs[group_2_label] then
+            this_bucket_size := this_bucket_size + 1;
+        end if;
+    end for;
+    if this_bucket_size gt max_bucket_size then
+        max_bucket_size := this_bucket_size;
+    end if;
+end for;
+
+print("Max bucket size:");
+max_bucket_size;
