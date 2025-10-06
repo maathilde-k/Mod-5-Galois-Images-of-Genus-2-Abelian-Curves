@@ -3,7 +3,32 @@ Attach("/projects/41d9a393-6a13-4259-bc6e-fa8eb804117b/threetorsimage/GSp.m");
 
 L := GSpLattice(4, 5, 0); // This computation takes about 2 minutes.
 
-Remove(~L, "1.1.1"); // exclude GSp4 itself
+// This function computes whether a subgroup contains an involution with similitude -1
+function possible_image(label)
+    M := Matrix(IntegerRing(5), [[0, 0, 0, 1], 
+                [0, 0, 1, 0], 
+                [0, 4, 0, 0],
+                [4, 0, 0,0]]); // this is the explicit symplectic form
+    for elt in L[label]`subgroup do
+        elt_ord := Order(elt);
+        sim_character := (Transpose(elt)*M*elt)[1,4];
+        // per chidambaram we need to check for existence of an order two element with similitude character -1
+        if (elt_ord eq 2) and (sim_character eq 4) then
+            return true;
+        end if;
+    end for;
+    return false;
+end function;
+
+// exclude GSp4 itself
+Remove(~L, "1.1.1"); 
+
+// exclude impossible subgroups
+for subgroup in L do
+    if not(possible_image(subgroup`label)) then
+        Remove(~L, subgroup`label);
+    end if;
+end for;
 
 // Given a finite matrix group, computes the characteristic polynomial and 
 // eigenspace dimensions of the elements (only for eigenvalues in ground field)
@@ -33,6 +58,8 @@ for group_1_label in Keys(L) do
         max_bucket_size := this_bucket_size;
     end if;
 end for;
+
+print("\n");
 
 print("Max bucket size:");
 max_bucket_size;
