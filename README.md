@@ -24,7 +24,7 @@ C := HyperellipticCurve(R![-1, 5, 1, -5, 0, 1], R![0, 1]);
 ImageByFroblist(L, dict, C);
 ```
 
-## Prepring
+## Preprint
 
 The preprint can be found on arXiv: https://arxiv.org/abs/2510.06423
 
